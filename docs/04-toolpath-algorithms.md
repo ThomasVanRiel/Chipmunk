@@ -12,85 +12,83 @@ All 2.5D toolpath generation follows the same pattern:
 
 ## Mesh Slicing (3D → 2D)
 
-### `toolpath/slicer.py`
+### `toolpath/slicer.rs`
 
 For STL/STEP inputs, we need to extract 2D cross-sections at specific Z heights.
 
 **Algorithm**:
-1. Use `trimesh.Trimesh.section(plane_origin, plane_normal)` to cut the mesh with a horizontal plane at the given Z height
-2. The result is a `trimesh.path.Path3D` — a set of 3D line segments lying in the cutting plane
-3. Project to 2D by dropping the Z coordinate → `Path2D`
-4. Convert `Path2D` entities (lines, arcs) to Shapely `Polygon`/`MultiPolygon`
+1. Cut the triangle mesh with a horizontal plane at the given Z height
+2. Collect all intersection line segments (each triangle intersecting the plane yields one segment)
+3. Chain segments into closed loops (connecting endpoints within tolerance)
+4. Convert loops to `geo::Polygon`/`geo::MultiPolygon`
 5. Cache slices by Z height (same Z is often queried multiple times)
 
 **Edge cases**:
 - Mesh may have multiple disconnected bodies → `MultiPolygon`
-- Holes in the cross-section (e.g., a tube) → Shapely polygon with interior rings
+- Holes in the cross-section (e.g., a tube) → polygon with interior rings
 - Very thin features may produce degenerate slices → filter by minimum area
 
-```python
-def slice_mesh(mesh: trimesh.Trimesh, z: float, tolerance: float = 0.001) -> MultiPolygon:
-    """Slice a mesh at height z, return 2D cross-section as Shapely geometry."""
-    ...
+```rust
+pub fn slice_mesh(mesh: &TriMesh, z: f64, tolerance: f64) -> MultiPolygon {
+    /// Slice a mesh at height z, return 2D cross-section as geo geometry.
+}
 ```
+
+**Note**: Unlike Python's trimesh which provides `mesh.section()`, the Rust implementation uses custom mesh slicing. The algorithm iterates over triangles, finds plane-triangle intersections, and chains the resulting segments into polygons. Libraries like `parry3d` can assist with the plane-mesh intersection.
 
 ## Polygon Offset
 
-### `toolpath/offset.py`
+### `toolpath/offset.rs`
 
-Wraps pyclipr (Clipper2) for computing tool-compensated profiles.
+Wraps geo-clipper (Clipper2 bindings) for computing tool-compensated profiles.
 
 **Operations**:
 - **Outward offset**: For outside profiling — expand the polygon by tool radius
 - **Inward offset**: For inside profiling and pocketing — shrink the polygon by tool radius
 - **Multi-step inward offset**: For pocketing — repeatedly shrink by stepover until nothing remains
 
-```python
-def offset_polygon(
-    polygon: MultiPolygon,
-    distance: float,            # Positive = outward, negative = inward
-    join_type: str = "round",   # "round", "square", "miter"
-    tolerance: float = 0.01,
-) -> MultiPolygon:
-    """Offset a polygon by the given distance."""
-    ...
+```rust
+pub fn offset_polygon(
+    polygon: &MultiPolygon,
+    distance: f64,             // Positive = outward, negative = inward
+    join_type: JoinType,       // Round, Square, Miter
+    tolerance: f64,
+) -> MultiPolygon {
+    /// Offset a polygon by the given distance.
+}
 
-def iterative_offset(
-    polygon: MultiPolygon,
-    stepover: float,
-    max_iterations: int = 1000,
-) -> list[MultiPolygon]:
-    """
-    Repeatedly offset inward by stepover until the polygon vanishes.
-    Returns list of offset polygons from outermost to innermost.
-    Used for contour-parallel pocketing.
-    """
-    ...
+pub fn iterative_offset(
+    polygon: &MultiPolygon,
+    stepover: f64,
+    max_iterations: usize,
+) -> Vec<MultiPolygon> {
+    /// Repeatedly offset inward by stepover until the polygon vanishes.
+    /// Returns list of offset polygons from outermost to innermost.
+    /// Used for contour-parallel pocketing.
+}
 ```
 
-**Why pyclipr over Shapely.buffer()?** Shapely's buffer works but is slower for the iterative offset case (pocketing can require hundreds of offset steps). pyclipr uses Clipper2 which is specifically optimized for polygon offsetting and boolean operations. Shapely is used for the geometry model; pyclipr is an implementation detail inside offset.py.
+**Why geo-clipper over geo's buffer?** The `geo` crate's buffer support is limited. geo-clipper provides Clipper2 bindings which are specifically optimized for polygon offsetting and boolean operations — critical for pocketing where hundreds of offset steps may be needed. `geo` is used for the geometry model; geo-clipper is an implementation detail inside `offset.rs`.
 
 ## Depth Strategy
 
-### `toolpath/depth_strategy.py`
+### `toolpath/depth_strategy.rs`
 
 Determines the Z levels for multi-pass operations.
 
-```python
-def compute_depth_passes(
-    start_depth: float,         # Usually 0.0 (stock top)
-    final_depth: float,         # Negative value (into stock)
-    depth_per_pass: float,      # Maximum cut depth per pass
-) -> list[float]:
-    """
-    Return list of Z heights for each pass, from shallowest to deepest.
-
-    Example: start=0, final=-10, depth_per_pass=3
-    Returns: [-3.0, -6.0, -9.0, -10.0]
-
-    The last pass may be shallower than depth_per_pass.
-    """
-    ...
+```rust
+pub fn compute_depth_passes(
+    start_depth: f64,       // Usually 0.0 (stock top)
+    final_depth: f64,       // Negative value (into stock)
+    depth_per_pass: f64,    // Maximum cut depth per pass
+) -> Vec<f64> {
+    /// Return list of Z heights for each pass, from shallowest to deepest.
+    ///
+    /// Example: start=0, final=-10, depth_per_pass=3
+    /// Returns: [-3.0, -6.0, -9.0, -10.0]
+    ///
+    /// The last pass may be shallower than depth_per_pass.
+}
 ```
 
 **Even distribution option**: Instead of fixed depth per pass with a shallow final pass, optionally distribute passes evenly:
@@ -99,7 +97,7 @@ def compute_depth_passes(
 
 ## Facing Operation
 
-### `toolpath/facing.py`
+### `toolpath/facing.rs`
 
 Removes material from the top of the stock to create a flat reference surface.
 
@@ -129,7 +127,7 @@ Y ↑
 
 ## Profile Operation
 
-### `toolpath/profile.py`
+### `toolpath/profile.rs`
 
 Cuts along the outline of a shape — like tracing the contour with the tool.
 
@@ -137,7 +135,7 @@ Cuts along the outline of a shape — like tracing the contour with the tool.
 1. Get 2D contour at target Z depth
 2. Apply tool compensation based on `CompensationMode`:
 
-   **CAM mode** (default):
+   **Cam mode** (default):
    - Outside profile: offset contour outward by `tool_diameter / 2`
    - Inside profile: offset contour inward by `tool_diameter / 2`
    - On-line profile: no offset
@@ -189,7 +187,7 @@ Tab = segment where Z raises to (final_depth + tab_height)
 
 ## Pocket Operation
 
-### `toolpath/pocket.py`
+### `toolpath/pocket.rs`
 
 Clears material from an enclosed area — the most algorithmically complex 2.5D operation.
 
@@ -262,14 +260,16 @@ Zigzag pocket clearing:
 
 ### Island Handling
 
-Islands (raised features inside the pocket that should not be cut) are represented as holes in the Shapely polygon.
+Islands (raised features inside the pocket that should not be cut) are represented as holes in the `geo::Polygon`.
 
-```python
-# Pocket boundary with island
-pocket = Polygon(
-    shell=[(0,0), (100,0), (100,80), (0,80)],
-    holes=[[(30,30), (50,30), (50,50), (30,50)]]
-)
+```rust
+// Pocket boundary with island
+let pocket = Polygon::new(
+    LineString::from(vec![(0.0, 0.0), (100.0, 0.0), (100.0, 80.0), (0.0, 80.0), (0.0, 0.0)]),
+    vec![
+        LineString::from(vec![(30.0, 30.0), (50.0, 30.0), (50.0, 50.0), (30.0, 50.0), (30.0, 30.0)]),
+    ],
+);
 ```
 
 The polygon offset operation naturally handles islands — as the offset shrinks the outer boundary, it also expands the island boundaries (since they are interior rings). Eventually the growing islands merge with the shrinking boundary, splitting the pocket into sub-pockets.
@@ -289,16 +289,16 @@ This is a Phase 2+ optimization — the initial implementation uses a single too
 
 Pocketing interacts with cutter compensation differently than profiling:
 
-- **Interior clearing passes**: Always use `CAM` mode — controller compensation doesn't make sense for parallel offset loops in the pocket interior.
+- **Interior clearing passes**: Always use `Cam` mode — controller compensation doesn't make sense for parallel offset loops in the pocket interior.
 - **Final wall pass**: The outermost contour-parallel pass (closest to the pocket wall) can optionally use `Controller` mode. This is implemented as a separate finishing pass:
-  1. Rough the pocket with `CAM` mode, leaving stock-to-leave on walls
+  1. Rough the pocket with `Cam` mode, leaving stock-to-leave on walls
   2. Run a single-pass profile along the pocket boundary with `Controller` mode (`G41`/`G42`)
 
-This allows the operator to fine-tune pocket dimensions on the machine. The `compensation` field on the operation controls whether this wall finishing pass uses `CAM` or `Controller` mode.
+This allows the operator to fine-tune pocket dimensions on the machine. The `compensation` field on the operation controls whether this wall finishing pass uses `Cam` or `Controller` mode.
 
 ## Drill Operation (Phase 4)
 
-### `toolpath/drill.py`
+### `toolpath/drill.rs`
 
 Generates drilling cycles for point features (holes).
 
@@ -311,7 +311,7 @@ Generates drilling cycles for point features (holes).
    - **Bore**: Feed to depth, optional dwell at bottom, feed retract
    - **Tap**: Feed to depth at pitch-synchronized feed, reverse retract
 
-**Dual output**: The toolpath generator always produces explicit moves (rapid/linear segments). When `use_canned_cycle=True`, the NC compiler additionally emits `CYCLE_DEFINE` + `CYCLE_CALL` blocks. The post-processor chooses which form to output based on its `supported_cycles` set:
+**Dual output**: The toolpath generator always produces explicit moves (rapid/linear segments). When `use_canned_cycle == true`, the NC compiler additionally emits `CycleDefine` + `CycleCall` blocks. The post-processor chooses which form to output based on its `supported_cycles` set:
 
 - **G-code controllers** (Fanuc, LinuxCNC, Haas): `G81`/`G83`/`G84`/`G85` with position-only lines, `G80` to cancel
 - **Heidenhain**: `CYCL DEF 200`/`203`/`207` with `M99` cycle call on position lines
@@ -321,7 +321,7 @@ See `03-nc-and-postprocessors.md` for full cycle type mapping.
 
 ## Segment Ordering
 
-### `toolpath/ordering.py`
+### `toolpath/ordering.rs`
 
 After generating individual toolpath loops/segments, they need to be ordered to minimize total rapid travel.
 

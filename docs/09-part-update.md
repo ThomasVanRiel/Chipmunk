@@ -54,49 +54,52 @@ New geometry from source
 
 Compare the old and new geometry to understand what changed. This uses cheap metrics first, then more detailed analysis only if needed.
 
-```python
-@dataclass
-class GeometryDiff:
-    # Bounding box changes
-    old_bbox: BoundingBox
-    new_bbox: BoundingBox
-    bbox_delta: BoundingBox          # Per-axis size difference
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeometryDiff {
+    // Bounding box changes
+    pub old_bbox: BoundingBox,
+    pub new_bbox: BoundingBox,
+    pub bbox_delta: BoundingBox,          // Per-axis size difference
 
-    # Volume/area (for meshes)
-    old_volume: float | None
-    new_volume: float | None
-    old_surface_area: float | None
-    new_surface_area: float | None
+    // Volume/area (for meshes)
+    pub old_volume: Option<f64>,
+    pub new_volume: Option<f64>,
+    pub old_surface_area: Option<f64>,
+    pub new_surface_area: Option<f64>,
 
-    # Topology (approximate — from mesh)
-    old_face_count: int
-    new_face_count: int
-    topology_changed: bool           # Significant face count difference
+    // Topology (approximate — from mesh)
+    pub old_face_count: usize,
+    pub new_face_count: usize,
+    pub topology_changed: bool,
 
-    # Centroid shift
-    old_centroid: tuple[float, float, float]
-    new_centroid: tuple[float, float, float]
-    centroid_shift: tuple[float, float, float]
+    // Centroid shift
+    pub old_centroid: [f64; 3],
+    pub new_centroid: [f64; 3],
+    pub centroid_shift: [f64; 3],
 
-    # Classification
-    change_type: ChangeType
+    // Classification
+    pub change_type: ChangeType,
+}
 
-class ChangeType(Enum):
-    IDENTICAL = "identical"               # No meaningful change
-    DIMENSIONS_ONLY = "dimensions_only"   # Same topology, different size
-    FEATURES_ADDED = "features_added"     # More geometry (new holes, pockets, bosses)
-    FEATURES_REMOVED = "features_removed" # Less geometry
-    FEATURES_MODIFIED = "features_modified"  # Both added and removed
-    ORIGIN_SHIFTED = "origin_shifted"     # Same shape, different position
-    MAJOR_CHANGE = "major_change"         # Substantially different part
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChangeType {
+    Identical,           // No meaningful change
+    DimensionsOnly,      // Same topology, different size
+    FeaturesAdded,       // More geometry (new holes, pockets, bosses)
+    FeaturesRemoved,     // Less geometry
+    FeaturesModified,    // Both added and removed
+    OriginShifted,       // Same shape, different position
+    MajorChange,         // Substantially different part
+}
 ```
 
 **Heuristics for classification**:
-- `IDENTICAL`: Bounding box, volume, and surface area all within tolerance (e.g., 0.001mm)
-- `DIMENSIONS_ONLY`: Face count unchanged, volume/area changed, centroid shift proportional to size change
-- `FEATURES_ADDED`: Face count increased, volume decreased (material removed = new pocket/hole) or increased (new boss)
-- `ORIGIN_SHIFTED`: Volume and surface area unchanged, centroid shifted
-- `MAJOR_CHANGE`: Large volume change (>20%) or face count change (>30%)
+- `Identical`: Bounding box, volume, and surface area all within tolerance (e.g., 0.001mm)
+- `DimensionsOnly`: Face count unchanged, volume/area changed, centroid shift proportional to size change
+- `FeaturesAdded`: Face count increased, volume decreased (material removed = new pocket/hole) or increased (new boss)
+- `OriginShifted`: Volume and surface area unchanged, centroid shifted
+- `MajorChange`: Large volume change (>20%) or face count change (>30%)
 
 ## Step 2: Registration (Alignment)
 
@@ -107,31 +110,38 @@ Find the rigid transform (translation + rotation) that best aligns the new geome
 **For mesh-to-mesh (STL) alignment:**
 
 1. **Bounding box pre-alignment**: Translate so centroids match as initial guess
-2. **ICP (Iterative Closest Point)**: Refine alignment using trimesh's built-in ICP (`trimesh.registration.icp`). This finds the rigid transform minimizing point-to-point distance between the two meshes.
+2. **ICP (Iterative Closest Point)**: Refine alignment iteratively. Sample points from both meshes, find closest pairs, compute optimal rigid transform, repeat until convergence. The ICP implementation is custom Rust using nalgebra for the SVD-based transform computation.
 3. **Validate**: If the residual error after ICP is below threshold, the alignment is good. If not, fall back to bounding-box alignment and flag for user review.
 
-```python
-def register_geometries(
-    old_mesh: trimesh.Trimesh,
-    new_mesh: trimesh.Trimesh,
-    method: str = "icp",          # "icp", "bbox_center", "bbox_corner", "manual"
-) -> RegistrationResult:
-    """
-    Find the transform that aligns new_mesh to old_mesh's coordinate frame.
-    Returns the 4x4 transform matrix and a confidence score.
-    """
-    ...
+```rust
+pub fn register_geometries(
+    old_mesh: &TriMesh,
+    new_mesh: &TriMesh,
+    method: RegistrationMethod,
+) -> RegistrationResult {
+    /// Find the transform that aligns new_mesh to old_mesh's coordinate frame.
+    /// Returns the 4x4 transform matrix and a confidence score.
+}
 
-@dataclass
-class RegistrationResult:
-    transform: np.ndarray         # 4x4 matrix to apply to new geometry
-    method_used: str              # Which method succeeded
-    residual_error: float         # Mean point-to-point distance after alignment
-    confidence: float             # 0.0-1.0, based on residual error relative to part size
+#[derive(Debug, Clone)]
+pub enum RegistrationMethod {
+    Icp,
+    BboxCenter,
+    BboxCorner,
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationResult {
+    pub transform: [[f64; 4]; 4],      // 4x4 matrix to apply to new geometry
+    pub method_used: String,
+    pub residual_error: f64,           // Mean point-to-point distance after alignment
+    pub confidence: f64,               // 0.0-1.0, based on residual error relative to part size
+}
 ```
 
 **For 2D contour (DXF/SVG) alignment:**
-- Simpler: align bounding box centers, then check if contours overlap using Shapely intersection-over-union (IoU)
+- Simpler: align bounding box centers, then check if contours overlap using geo intersection-over-union (IoU)
 - If IoU is high, alignment is good; if not, try rotating 90°/180°/270° and re-check
 
 ### User Override
@@ -145,19 +155,21 @@ The user can always manually adjust the alignment:
 
 After alignment, generate a human-readable report of what changed.
 
-```python
-@dataclass
-class ChangeReport:
-    diff: GeometryDiff
-    registration: RegistrationResult
-    changes: list[ChangeItem]
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeReport {
+    pub diff: GeometryDiff,
+    pub registration: RegistrationResult,
+    pub changes: Vec<ChangeItem>,
+}
 
-@dataclass
-class ChangeItem:
-    category: str                 # "dimension", "feature", "origin", "topology"
-    description: str              # Human-readable, e.g. "Part is 5mm wider in X"
-    severity: str                 # "info", "warning", "critical"
-    affected_operations: list[str]  # Operation IDs that may be impacted
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeItem {
+    pub category: String,             // "dimension", "feature", "origin", "topology"
+    pub description: String,          // Human-readable, e.g. "Part is 5mm wider in X"
+    pub severity: String,             // "info", "warning", "critical"
+    pub affected_operations: Vec<Uuid>,
+}
 ```
 
 **Example change items**:
@@ -171,19 +183,22 @@ class ChangeItem:
 
 Check each existing operation against the new geometry. For each operation, determine a status.
 
-```python
-class OperationStatus(Enum):
-    OK = "ok"                     # Operation is still valid, no changes needed
-    ADJUSTED = "adjusted"         # Auto-adjusted (e.g., depths updated) — needs review
-    REVIEW = "review"             # Probably still valid but geometry changed in the operation area
-    INVALID = "invalid"           # Operation can't work (e.g., deeper than new part, outside bounds)
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OperationStatus {
+    Ok,           // Operation is still valid, no changes needed
+    Adjusted,     // Auto-adjusted (e.g., depths updated) — needs review
+    Review,       // Probably still valid but geometry changed in the operation area
+    Invalid,      // Operation can't work (e.g., deeper than new part, outside bounds)
+}
 
-@dataclass
-class OperationAudit:
-    operation_id: str
-    status: OperationStatus
-    issues: list[str]             # Human-readable descriptions
-    auto_adjustments: list[str]   # What was auto-corrected
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationAudit {
+    pub operation_id: Uuid,
+    pub status: OperationStatus,
+    pub issues: Vec<String>,          // Human-readable descriptions
+    pub auto_adjustments: Vec<String>,
+}
 ```
 
 ### Audit Checks
@@ -197,14 +212,14 @@ For each operation, run these checks against the new geometry:
 
 **Contour checks** (for profile/pocket):
 - Slice the new mesh at the operation's Z depths
-- Compare the new cross-section with the old one using Shapely:
-  - `old_contour.symmetric_difference(new_contour).area` → how much changed
-  - Small change → `OK` or `REVIEW`
-  - Large change or contour vanished → `INVALID`
+- Compare the new cross-section with the old one using geo:
+  - Symmetric difference area → how much changed
+  - Small change → `Ok` or `Review`
+  - Large change or contour vanished → `Invalid`
 
 **Stock checks**:
 - Does the new bounding box still fit within the defined stock?
-- If not → `REVIEW` with suggestion to update stock dimensions
+- If not → `Review` with suggestion to update stock dimensions
 
 **Tool checks**:
 - For pockets: is the tool diameter still smaller than the narrowest feature?
@@ -235,23 +250,23 @@ The update review is presented as a modal dialog/panel before the update is appl
 │  Change type: Dimensions + new features         │
 │                                                 │
 │  Changes:                                       │
-│  ℹ Part width (X): 100mm → 105mm               │
-│  ℹ New feature: volume decreased 2.3cm³         │
-│  ⚠ Origin shifted 10mm in Y (auto-corrected)   │
-│  ⚠ Stock too small: 100mm < 105mm in X         │
+│  i Part width (X): 100mm → 105mm               │
+│  i New feature: volume decreased 2.3cm³         │
+│  ! Origin shifted 10mm in Y (auto-corrected)   │
+│  ! Stock too small: 100mm < 105mm in X         │
 │                                                 │
 │  Operations:                                    │
-│  ✓ Facing (top)           OK                    │
+│  v Facing (top)           OK                    │
 │  ~ Rough pocket           ADJUSTED              │
-│    └ Depth scaled 20mm → 22mm                   │
+│    L Depth scaled 20mm → 22mm                   │
 │  ! Outside profile        REVIEW                │
-│    └ Contour changed at Z=-10mm                 │
-│  ✓ Drill holes            OK                    │
+│    L Contour changed at Z=-10mm                 │
+│  v Drill holes            OK                    │
 │                                                 │
 │  Suggestions:                                   │
-│  □ Update stock to 110 x 80 x 25mm             │
-│  □ Accept depth adjustments                     │
-│  □ Regenerate all toolpaths after update        │
+│  [ ] Update stock to 110 x 80 x 25mm           │
+│  [ ] Accept depth adjustments                   │
+│  [ ] Regenerate all toolpaths after update      │
 │                                                 │
 │  [Accept & Update]  [Update without adjustments] │
 │  [Cancel]                                       │
@@ -280,29 +295,23 @@ The two-step API (preview → apply) ensures the user always reviews changes bef
 
 ## Data Model Additions
 
-```python
-@dataclass
-class PartGeometry:
-    # ...existing fields...
-
-    # Update history
-    update_history: list[PartUpdate]
-
-@dataclass
-class PartUpdate:
-    timestamp: str                    # ISO 8601
-    previous_version: str | None      # Provenance version before update
-    new_version: str | None           # Provenance version after update
-    change_type: ChangeType
-    registration_transform: list[list[float]]  # 4x4 matrix applied
-    auto_adjustments: list[str]       # What was auto-corrected
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartUpdate {
+    pub timestamp: String,                         // ISO 8601
+    pub previous_version: Option<String>,          // Provenance version before update
+    pub new_version: Option<String>,               // Provenance version after update
+    pub change_type: ChangeType,
+    pub registration_transform: [[f64; 4]; 4],     // 4x4 matrix applied
+    pub auto_adjustments: Vec<String>,             // What was auto-corrected
+}
 ```
 
 This gives a full audit trail of how the part evolved and what adjustments were made. If something goes wrong, the user can understand what happened.
 
 ## Edge Cases
 
-**Part replaced with completely different geometry**: `MAJOR_CHANGE` classification. All operations flagged as `REVIEW`. User must confirm they actually want to replace (not a wrong file).
+**Part replaced with completely different geometry**: `MajorChange` classification. All operations flagged as `Review`. User must confirm they actually want to replace (not a wrong file).
 
 **Part scaled uniformly** (e.g., mm → inch conversion error): Detect via volume ratio being a cube of a common factor (25.4³). Warn the user about possible unit mismatch.
 

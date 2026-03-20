@@ -6,7 +6,8 @@
 CAMproject/
 ├── LICENSE                         # MIT License
 ├── CLAUDE.md                       # Claude Code guidance
-├── pyproject.toml                  # Python package config (PEP 621 + hatchling)
+├── Cargo.toml                      # Rust workspace root
+├── Cargo.lock                      # Dependency lockfile
 ├── docs/                           # Design documentation (these files)
 │   ├── 00-overview.md
 │   ├── 01-data-model.md
@@ -15,64 +16,69 @@ CAMproject/
 │   ├── 04-toolpath-algorithms.md
 │   ├── 05-frontend-design.md
 │   ├── 06-project-structure.md
-│   └── 07-implementation-phases.md
+│   ├── 07-implementation-phases.md
+│   ├── 08-integrations.md
+│   └── 09-part-update.md
 ├── src/
-│   └── camproject/
-│       ├── __init__.py             # Version string
-│       ├── __main__.py             # `python -m camproject` entry point
-│       ├── server.py               # FastAPI app, CORS, static files, lifespan
-│       ├── api/
-│       │   ├── __init__.py
-│       │   ├── routes.py           # REST API endpoints
-│       │   └── websocket.py        # WebSocket handler for progress
-│       ├── core/
-│       │   ├── __init__.py
-│       │   ├── project.py          # Project container, save/load
-│       │   ├── geometry.py         # PartGeometry, StockDefinition
-│       │   ├── tool.py             # Tool definitions
-│       │   ├── operation.py        # Operation types and params
-│       │   ├── toolpath.py         # Toolpath, ToolpathSegment
-│       │   └── units.py            # mm/inch enum and conversion
-│       ├── toolpath/
-│       │   ├── __init__.py
-│       │   ├── slicer.py           # Mesh → 2D cross-sections
-│       │   ├── offset.py           # Polygon offset (pyclipr wrapper)
-│       │   ├── facing.py           # Facing toolpath generator
-│       │   ├── profile.py          # Profile toolpath generator
-│       │   ├── pocket.py           # Pocket toolpath generator
-│       │   ├── drill.py            # Drill cycle generator (Phase 4)
-│       │   ├── ordering.py         # Segment ordering optimization
-│       │   └── depth_strategy.py   # Multi-pass Z stepping
-│       ├── nc/
-│       │   ├── __init__.py
-│       │   ├── ir.py               # NCBlock, BlockType
-│       │   ├── compiler.py         # Toolpath → NCBlock list
-│       │   ├── base.py             # PostProcessor ABC
-│       │   └── registry.py         # Plugin discovery via entry_points
-│       ├── postprocessors/
-│       │   ├── __init__.py
-│       │   ├── linuxcnc.py         # LinuxCNC post-processor
-│       │   ├── grbl.py             # Grbl post-processor
-│       │   ├── marlin.py           # Marlin post-processor
-│       │   ├── generic_fanuc.py    # Generic Fanuc post-processor
-│       │   ├── sinumerik.py         # Siemens Sinumerik
-│       │   └── heidenhain.py       # Heidenhain TNC conversational
-│       ├── io/
-│       │   ├── __init__.py
-│       │   ├── stl_reader.py       # STL → PartGeometry (via trimesh)
-│       │   ├── dxf_reader.py       # DXF → PartGeometry (via ezdxf)
-│       │   ├── svg_reader.py       # SVG → PartGeometry (via svgpathtools)
-│       │   ├── step_reader.py      # STEP → PartGeometry (stub → Phase 5)
-│       │   └── project_file.py     # .camproj save/load
-│       ├── integrations/
-│       │   ├── __init__.py
-│       │   ├── base.py              # CADIntegration ABC
-│       │   ├── onshape.py           # Onshape REST API (Phase 4-5)
-│       │   ├── freecad.py           # FreeCAD file/CLI (Phase 5+)
-│       │   └── watch_folder.py      # Generic file watcher (Phase 3-4)
-│       └── utils/
-│           ├── __init__.py
-│           └── math_utils.py       # Arc fitting, geometric helpers
+│   ├── main.rs                     # Entry point: starts axum server
+│   ├── lib.rs                      # Library root, module declarations
+│   ├── api/
+│   │   ├── mod.rs                  # API module root, router setup
+│   │   ├── routes.rs               # REST API endpoint handlers
+│   │   ├── websocket.rs            # WebSocket handler for progress
+│   │   └── state.rs                # AppState (shared server state)
+│   ├── core/
+│   │   ├── mod.rs
+│   │   ├── project.rs              # Project container, save/load
+│   │   ├── geometry.rs             # PartGeometry, StockDefinition, BoundingBox
+│   │   ├── tool.rs                 # Tool definitions, ToolLibrary
+│   │   ├── operation.rs            # Operation types and params
+│   │   ├── toolpath.rs             # Toolpath, ToolpathSegment, MoveType
+│   │   └── units.rs                # mm/inch enum and conversion
+│   ├── toolpath/
+│   │   ├── mod.rs
+│   │   ├── slicer.rs               # Mesh → 2D cross-sections
+│   │   ├── offset.rs               # Polygon offset (clipper2 wrapper)
+│   │   ├── facing.rs               # Facing toolpath generator
+│   │   ├── profile.rs              # Profile toolpath generator
+│   │   ├── pocket.rs               # Pocket toolpath generator
+│   │   ├── drill.rs                # Drill cycle generator (Phase 4)
+│   │   ├── ordering.rs             # Segment ordering optimization
+│   │   └── depth_strategy.rs       # Multi-pass Z stepping
+│   ├── nc/
+│   │   ├── mod.rs
+│   │   ├── ir.rs                   # NCBlock, BlockType enum
+│   │   ├── compiler.rs             # Toolpath → NCBlock list
+│   │   └── bridge.rs               # PyO3 bridge: NCBlock → Python objects
+│   ├── io/
+│   │   ├── mod.rs
+│   │   ├── stl_reader.rs           # STL → PartGeometry
+│   │   ├── dxf_reader.rs           # DXF → PartGeometry
+│   │   ├── svg_reader.rs           # SVG → PartGeometry
+│   │   ├── step_reader.rs          # STEP → PartGeometry (stub → Phase 5)
+│   │   └── project_file.rs         # .camproj save/load (serde JSON)
+│   ├── integrations/
+│   │   ├── mod.rs
+│   │   ├── onshape.rs              # Onshape REST API (Phase 4-5)
+│   │   ├── freecad.rs              # FreeCAD file/CLI (Phase 5+)
+│   │   └── watch_folder.rs         # Generic file watcher (Phase 3-4)
+│   └── utils/
+│       ├── mod.rs
+│       └── math.rs                 # Arc fitting, geometric helpers
+├── postprocessors/                 # Python package for post-processors
+│   ├── pyproject.toml              # Python package config (post-processors only)
+│   ├── src/
+│   │   └── camproject_post/
+│   │       ├── __init__.py
+│   │       ├── base.py             # PostProcessor ABC, NCBlock Python types
+│   │       ├── linuxcnc.py         # LinuxCNC post-processor
+│   │       ├── grbl.py             # Grbl post-processor
+│   │       ├── marlin.py           # Marlin post-processor
+│   │       ├── generic_fanuc.py    # Generic Fanuc post-processor
+│   │       ├── sinumerik.py        # Siemens Sinumerik
+│   │       └── heidenhain.py       # Heidenhain TNC conversational
+│   └── tests/
+│       └── test_postprocessors.py  # Post-processor unit tests
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json
@@ -103,18 +109,18 @@ CAMproject/
 │   └── styles/
 │       └── main.css
 └── tests/
-    ├── conftest.py
-    ├── test_geometry.py
-    ├── test_slicer.py
-    ├── test_offset.py
-    ├── test_facing.py
-    ├── test_profile.py
-    ├── test_pocket.py
-    ├── test_nc_compiler.py
-    ├── test_postprocessors.py
-    ├── test_dxf_reader.py
-    ├── test_svg_reader.py
-    ├── test_api.py
+    ├── common/
+    │   └── mod.rs                  # Shared test utilities, fixtures
+    ├── test_geometry.rs
+    ├── test_slicer.rs
+    ├── test_offset.rs
+    ├── test_facing.rs
+    ├── test_profile.rs
+    ├── test_pocket.rs
+    ├── test_nc_compiler.rs
+    ├── test_dxf_reader.rs
+    ├── test_svg_reader.rs
+    ├── test_api.rs
     └── fixtures/
         ├── cube.stl
         ├── simple_pocket.stl
@@ -122,145 +128,179 @@ CAMproject/
         └── circle.svg
 ```
 
-## pyproject.toml
+## Cargo.toml
+
+```toml
+[package]
+name = "camproject"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Browser-based CAM tool for CNC milling NC code generation"
+authors = ["Thomas Van Riel"]
+
+[dependencies]
+# Web framework
+axum = { version = "0.8", features = ["ws", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Geometry
+geo = "0.29"
+geo-clipper = "0.8"                # Clipper2 bindings for polygon offset
+nalgebra = "0.33"                  # Linear algebra, transforms
+parry3d = "0.17"                   # 3D collision/geometry (mesh slicing)
+
+# File I/O
+stl_io = "0.7"                     # STL reading
+dxf-rs = "0.6"                     # DXF reading
+usvg = "0.44"                      # SVG parsing
+
+# Python bridge (for post-processors)
+pyo3 = { version = "0.23", features = ["auto-initialize"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+thiserror = "2"
+
+[dev-dependencies]
+axum-test = "16"                   # HTTP testing for axum
+tempfile = "3"
+approx = "0.5"                     # Float comparison in tests
+
+[features]
+step = ["dep:opencascade-rs"]      # Optional STEP/OpenCascade support
+
+[dependencies.opencascade-rs]
+version = "0.2"
+optional = true
+```
+
+## Post-Processor Python Package (pyproject.toml)
+
+The `postprocessors/` directory is a standalone Python package. It contains the `PostProcessor` base class, NCBlock Python types, and all built-in post-processors.
 
 ```toml
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "httpx>=0.27",
-    "ruff>=0.3",
-    "mypy>=1.8",
-]
-
 [project]
-name = "camproject"
+name = "camproject-post"
 version = "0.1.0"
-description = "Browser-based CAM tool for CNC milling NC code generation"
-readme = "README.md"
+description = "Post-processors for CAMproject CNC code generation"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
     { name = "Thomas Van Riel" },
 ]
-dependencies = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
-    "python-multipart>=0.0.7",    # For file uploads
-    "trimesh>=4.0",
-    "numpy>=1.24",
-    "shapely>=2.0",
-    "pyclipr>=0.2",
-    "ezdxf>=1.3",
-    "svgpathtools>=1.6",
-]
+dependencies = []  # No external deps — NCBlock types come from Rust via PyO3
 
 [project.optional-dependencies]
-step = ["OCP>=7.7"]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "httpx>=0.27",                # For testing FastAPI with TestClient
     "ruff>=0.3",
-    "mypy>=1.8",
 ]
 
-[project.scripts]
-camproject = "camproject.__main__:main"
-
 [project.entry-points."camproject.postprocessors"]
-linuxcnc = "camproject.postprocessors.linuxcnc:LinuxCNCPost"
-grbl = "camproject.postprocessors.grbl:GrblPost"
-marlin = "camproject.postprocessors.marlin:MarlinPost"
-fanuc = "camproject.postprocessors.generic_fanuc:GenericFanucPost"
-sinumerik = "camproject.postprocessors.sinumerik:SinumerikPost"
-heidenhain = "camproject.postprocessors.heidenhain:HeidenhainPost"
+linuxcnc = "camproject_post.linuxcnc:LinuxCNCPost"
+grbl = "camproject_post.grbl:GrblPost"
+marlin = "camproject_post.marlin:MarlinPost"
+fanuc = "camproject_post.generic_fanuc:GenericFanucPost"
+sinumerik = "camproject_post.sinumerik:SinumerikPost"
+heidenhain = "camproject_post.heidenhain:HeidenhainPost"
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["src"]
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
 ```
 
 ## Development Commands
 
-uv is the project's Python package manager. It handles virtualenv creation, dependency resolution, and lockfile management automatically.
-
 ```bash
-# Install dependencies (creates .venv automatically)
-uv sync                                  # All deps including dev
-uv sync --extra step                     # Also install STEP/OpenCascade support
+# Build the Rust backend
+cargo build                          # Debug build
+cargo build --release                # Release build
+cargo build --features step          # With STEP/OpenCascade support
 
-# Run the server (backend)
-uv run python -m camproject                    # Production: serves frontend from frontend/dist/
-uv run python -m camproject --dev --port 8000  # Development: API only, CORS enabled
+# Run the server
+cargo run                            # Production: serves frontend from frontend/dist/
+cargo run -- --dev --port 8000       # Development: API only, CORS enabled
+
+# Run tests
+cargo test                           # All Rust tests
+cargo test test_pocket               # Tests matching keyword
+cargo test -- --nocapture            # Show println output
+cargo test --test test_facing        # Single test file
+
+# Lint & format
+cargo clippy                         # Lint
+cargo fmt                            # Format
+cargo fmt -- --check                 # Check formatting without modifying
+
+# Post-processor Python package
+cd postprocessors
+uv sync                              # Install Python deps
+uv run pytest                        # Run post-processor tests
+uv run ruff check src/               # Lint Python
+uv run ruff format src/              # Format Python
 
 # Frontend development
 cd frontend
 npm install
-npm run dev                             # Vite dev server on :5173, proxies /api to :8000
+npm run dev                          # Vite dev server on :5173, proxies /api to :8000
 
 # Frontend build (for production)
 cd frontend
-npm run build                           # Outputs to frontend/dist/
-
-# Run tests
-uv run pytest                                  # All tests
-uv run pytest tests/test_pocket.py             # Single test file
-uv run pytest tests/test_pocket.py::test_square_pocket  # Single test
-uv run pytest -x                               # Stop on first failure
-uv run pytest -k "profile"                     # Tests matching keyword
-
-# Lint
-uv run ruff check src/
-uv run ruff format src/
-
-# Type check
-uv run mypy src/camproject/
-
-# Dependency management
-uv add <package>                         # Add runtime dependency
-uv add --dev <package>                   # Add dev dependency
-uv lock                                  # Update lockfile
+npm run build                        # Outputs to frontend/dist/
 ```
 
 ## Module Dependency Rules
 
 ```
-api/  →  core/, toolpath/, nc/, postprocessors/, io/
+api/  →  core/, toolpath/, nc/, io/, integrations/
           (API layer can import everything)
 
-core/ →  (no internal dependencies, only external: trimesh, shapely, numpy)
+core/ →  (no internal dependencies, only external: geo, nalgebra, serde)
 
 toolpath/ →  core/
               (toolpath generators use core types)
 
 nc/   →  core/
-          (NC compiler uses core types)
-
-postprocessors/ →  nc/
-                    (post-processors extend nc/base.py)
+          (NC compiler uses core types; bridge.rs uses PyO3)
 
 io/   →  core/
           (readers produce core types)
 
+integrations/ → io/, core/
+                (integrations use readers and core types)
+
 utils/ →  (no internal dependencies)
 ```
 
-No circular dependencies. The `core/` package is the foundation that everything depends on but depends on nothing internal.
+No circular dependencies. The `core/` module is the foundation that everything depends on but depends on nothing internal.
+
+## PyO3 Bridge
+
+The `nc/bridge.rs` module converts Rust `NCBlock` structs into Python objects that the post-processor Python code can work with. The bridge:
+
+1. Initializes a Python interpreter (embedded via PyO3)
+2. Discovers post-processors via `importlib.metadata.entry_points`
+3. Converts `Vec<NCBlock>` → Python list of NCBlock objects
+4. Calls the post-processor's `generate()` method
+5. Returns the NC code string back to Rust
+
+```
+Rust: Vec<NCBlock>  →  PyO3  →  Python: list[NCBlock]  →  PostProcessor.generate()  →  str  →  PyO3  →  Rust: String
+```
+
+The `postprocessors/src/camproject_post/base.py` file defines the Python-side `NCBlock` dataclass and `PostProcessor` ABC that mirror the Rust types. PyO3 handles the type conversion automatically.

@@ -10,16 +10,16 @@ CAMproject should be able to connect to external CAD systems to import geometry 
 ┌────────────────────┐     ┌──────────────────────┐
 │  External CAD      │     │     CAMproject        │
 │  ┌──────────────┐  │     │  ┌────────────────┐   │
-│  │   Onshape    │──┼─API─┼─→│  integrations/ │   │
-│  │   FreeCAD    │──┼─────┼─→│    onshape.py  │   │
-│  │   Fusion 360 │──┼─────┼─→│    freecad.py  │   │
-│  │   SolidWorks │──┼─────┼─→│    ...         │   │
+│  │   Onshape    │──┼─API─┼─→│ integrations/  │   │
+│  │   FreeCAD    │──┼─────┼─→│   onshape.rs   │   │
+│  │   Fusion 360 │──┼─────┼─→│   freecad.rs   │   │
+│  │   SolidWorks │──┼─────┼─→│   ...          │   │
 │  └──────────────┘  │     │  └───────┬────────┘   │
 └────────────────────┘     │          ↓             │
                            │  ┌────────────────┐   │
                            │  │    io/          │   │
-                           │  │  stl_reader.py  │   │
-                           │  │  step_reader.py │   │
+                           │  │  stl_reader.rs  │   │
+                           │  │  step_reader.rs │   │
                            │  └───────┬────────┘   │
                            │          ↓             │
                            │  ┌────────────────┐   │
@@ -32,65 +32,55 @@ The integration layer sits **above** the existing `io/` readers. It handles auth
 
 ## Integration Interface
 
-```python
-# integrations/base.py
+```rust
+// integrations/mod.rs
 
-class CADIntegration(ABC):
-    """Base class for external CAD system integrations."""
+#[async_trait]
+pub trait CADIntegration: Send + Sync {
+    /// Human-readable name, e.g. "Onshape".
+    fn name(&self) -> &str;
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Human-readable name, e.g. 'Onshape'."""
-        ...
+    /// Authenticate with the external service.
+    async fn authenticate(&self, credentials: &HashMap<String, String>) -> Result<bool>;
 
-    @abstractmethod
-    async def authenticate(self, credentials: dict) -> bool:
-        """Authenticate with the external service."""
-        ...
+    /// List available documents/projects.
+    async fn list_documents(&self) -> Result<Vec<CADDocument>>;
 
-    @abstractmethod
-    async def list_documents(self) -> list[CADDocument]:
-        """List available documents/projects."""
-        ...
+    /// List parts/bodies in a document.
+    async fn list_parts(&self, document_id: &str) -> Result<Vec<CADPart>>;
 
-    @abstractmethod
-    async def list_parts(self, document_id: str) -> list[CADPart]:
-        """List parts/bodies in a document."""
-        ...
+    /// Export a part as geometry data.
+    async fn export_part(
+        &self,
+        document_id: &str,
+        part_id: &str,
+        format: &str,  // "step", "stl", or "parasolid"
+    ) -> Result<Vec<u8>>;
 
-    @abstractmethod
-    async def export_part(
-        self,
-        document_id: str,
-        part_id: str,
-        format: str = "step",  # "step", "stl", or "parasolid"
-    ) -> bytes:
-        """Export a part as geometry data."""
-        ...
+    /// Check if the part has been modified since last import.
+    async fn check_for_updates(
+        &self,
+        document_id: &str,
+        part_id: &str,
+        last_version: &str,
+    ) -> Result<bool>;
+}
 
-    async def check_for_updates(
-        self,
-        document_id: str,
-        part_id: str,
-        last_version: str,
-    ) -> bool:
-        """Check if the part has been modified since last import."""
-        ...
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CADDocument {
+    pub id: String,
+    pub name: String,
+    pub last_modified: String,
+    pub thumbnail_url: Option<String>,
+}
 
-@dataclass
-class CADDocument:
-    id: str
-    name: str
-    last_modified: str
-    thumbnail_url: str | None
-
-@dataclass
-class CADPart:
-    id: str
-    name: str
-    version: str             # Version/revision identifier for change detection
-    body_type: str           # "solid", "surface", "assembly"
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CADPart {
+    pub id: String,
+    pub name: String,
+    pub version: String,       // Version/revision identifier for change detection
+    pub body_type: String,     // "solid", "surface", "assembly"
+}
 ```
 
 ## Onshape Integration
@@ -117,44 +107,52 @@ Onshape provides REST endpoints for:
 1. User connects their Onshape account (OAuth2 flow or API key entry)
 2. User browses their Onshape documents in a dialog within CAMproject
 3. User selects a part → CAMproject fetches it as STEP (preferred) or STL
-4. The geometry is passed to `step_reader.py` or `stl_reader.py` → `PartGeometry`
+4. The geometry is passed to `step_reader.rs` or `stl_reader.rs` → `PartGeometry`
 5. The `PartGeometry` stores the Onshape reference (document ID, part ID, version)
 6. On "refresh", CAMproject checks if the version has changed and re-imports if so
 
 ### Implementation
 
-```python
-# integrations/onshape.py
+```rust
+// integrations/onshape.rs
 
-class OnshapeIntegration(CADIntegration):
-    """Onshape REST API integration."""
+pub struct OnshapeIntegration {
+    base_url: String,  // "https://cad.onshape.com/api/v6"
+    access_key: String,
+    secret_key: String,
+    client: reqwest::Client,
+}
 
-    BASE_URL = "https://cad.onshape.com/api/v6"
+#[async_trait]
+impl CADIntegration for OnshapeIntegration {
+    fn name(&self) -> &str { "Onshape" }
 
-    def __init__(self, access_key: str, secret_key: str):
-        self.access_key = access_key
-        self.secret_key = secret_key
-        # Onshape uses HMAC-based request signing for API key auth
-
-    async def authenticate(self, credentials: dict) -> bool:
-        # Verify credentials by calling a lightweight endpoint
+    async fn authenticate(&self, credentials: &HashMap<String, String>) -> Result<bool> {
+        // Verify credentials by calling a lightweight endpoint
+        // Onshape uses HMAC-based request signing for API key auth
         ...
+    }
 
-    async def list_documents(self) -> list[CADDocument]:
-        # GET /api/v6/documents
+    async fn list_documents(&self) -> Result<Vec<CADDocument>> {
+        // GET /api/v6/documents
         ...
+    }
 
-    async def list_parts(self, document_id: str) -> list[CADPart]:
-        # GET /api/v6/partstudios/{did}/w/{wid}/parts
+    async fn list_parts(&self, document_id: &str) -> Result<Vec<CADPart>> {
+        // GET /api/v6/partstudios/{did}/w/{wid}/parts
         ...
+    }
 
-    async def export_part(self, document_id: str, part_id: str, format: str = "step") -> bytes:
-        # GET /api/v6/partstudios/{did}/w/{wid}/step (or /stl)
+    async fn export_part(&self, document_id: &str, part_id: &str, format: &str) -> Result<Vec<u8>> {
+        // GET /api/v6/partstudios/{did}/w/{wid}/step (or /stl)
         ...
+    }
 
-    async def check_for_updates(self, document_id: str, part_id: str, last_version: str) -> bool:
-        # Compare current microversion with stored version
+    async fn check_for_updates(&self, document_id: &str, part_id: &str, last_version: &str) -> Result<bool> {
+        // Compare current microversion with stored version
         ...
+    }
+}
 ```
 
 ### API Endpoints for Integration
@@ -177,32 +175,36 @@ POST /api/integrations/onshape/refresh/{part_id} — check for updates and re-im
 
 FreeCAD is an important integration target because it's open-source and widely used.
 
-### Approach Options
+### Approach
 
-**Option A: FreeCAD Python library** — FreeCAD can be imported as a Python module. If FreeCAD is installed, `import FreeCAD` gives access to its document model. This allows reading `.FCStd` files directly.
+Use FreeCAD CLI (`freecadcmd`) as a subprocess to convert `.FCStd` to STEP/STL. This is simpler and more portable than trying to link FreeCAD's libraries directly.
 
-```python
-# integrations/freecad.py
-import FreeCAD
-import Part  # FreeCAD Part module
+```rust
+// integrations/freecad.rs
 
-class FreeCADIntegration(CADIntegration):
-    async def export_part(self, document_id: str, part_id: str, format: str = "step") -> bytes:
-        doc = FreeCAD.open(document_id)  # document_id = file path
-        shape = doc.getObject(part_id).Shape
-        step_bytes = shape.exportStep()
-        return step_bytes
+pub struct FreeCADIntegration {
+    freecad_path: PathBuf,  // Path to freecadcmd binary
+}
+
+#[async_trait]
+impl CADIntegration for FreeCADIntegration {
+    async fn export_part(&self, document_id: &str, part_id: &str, format: &str) -> Result<Vec<u8>> {
+        // document_id = file path to .FCStd file
+        // Run freecadcmd with a Python script to export as STEP/STL
+        let output = tokio::process::Command::new(&self.freecad_path)
+            .args(&["--run-script", &export_script_path])
+            .output()
+            .await?;
+        ...
+    }
+}
 ```
-
-**Option B: FreeCAD CLI** — Use `freecadcmd` as a subprocess to convert `.FCStd` to STEP/STL.
-
-Option A is more tightly integrated but couples us to FreeCAD's Python environment. Option B is simpler and more portable. Start with Option B.
 
 ### Workflow
 
 1. User opens a `.FCStd` file (or browses for one)
 2. CAMproject calls FreeCAD CLI to list bodies and export as STEP
-3. Geometry goes through `step_reader.py` as usual
+3. Geometry goes through `step_reader.rs` as usual
 
 ## Fusion 360 / SolidWorks (Future)
 
@@ -222,45 +224,36 @@ For CAD systems without API access, a simple "watch folder" integration:
 
 This is the simplest integration path and works universally. Many CAD tools support auto-export to a directory on save.
 
-```python
-# integrations/watch_folder.py
+```rust
+// integrations/watch_folder.rs
 
-class WatchFolderIntegration:
-    """Watch a directory for geometry file changes."""
+pub struct WatchFolderIntegration {
+    watch_path: PathBuf,
+    poll_interval: Duration,
+}
 
-    def __init__(self, watch_path: str, poll_interval: float = 2.0):
+impl WatchFolderIntegration {
+    /// Start polling for file changes. Emits events via WebSocket.
+    pub async fn start_watching(&self, tx: broadcast::Sender<FileChangeEvent>) {
         ...
-
-    async def start_watching(self):
-        """Start polling for file changes. Emits events via WebSocket."""
-        ...
-```
-
-## Project Structure Addition
-
-```
-src/camproject/
-├── integrations/
-│   ├── __init__.py
-│   ├── base.py              # CADIntegration ABC, CADDocument, CADPart
-│   ├── onshape.py           # Onshape REST API integration
-│   ├── freecad.py           # FreeCAD file/CLI integration
-│   └── watch_folder.py      # Generic file-watching integration
+    }
+}
 ```
 
 ## Part Provenance
 
 When geometry is imported from an external source, the `PartGeometry` stores provenance metadata:
 
-```python
-@dataclass
-class PartProvenance:
-    source_type: str                # "file", "onshape", "freecad", "watch_folder"
-    source_path: str | None         # File path (for file/watch_folder)
-    source_document_id: str | None  # External document ID (for onshape/freecad)
-    source_part_id: str | None      # External part ID
-    source_version: str | None      # Version/revision at time of import
-    imported_at: str                 # ISO 8601 timestamp
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartProvenance {
+    pub source_type: String,                // "file", "onshape", "freecad", "watch_folder"
+    pub source_path: Option<String>,        // File path (for file/watch_folder)
+    pub source_document_id: Option<String>, // External document ID (for onshape/freecad)
+    pub source_part_id: Option<String>,     // External part ID
+    pub source_version: Option<String>,     // Version/revision at time of import
+    pub imported_at: String,                // ISO 8601 timestamp
+}
 ```
 
 This enables:

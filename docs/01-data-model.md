@@ -2,19 +2,19 @@
 
 ## Overview
 
-The data model is centered around a `Project` which contains everything needed to go from imported geometry to NC code output. All types live in `src/camproject/core/`.
+The data model is centered around a `Project` which contains everything needed to go from imported geometry to NC code output. All types live in `src/core/`.
 
 ## Type Hierarchy
 
 ```
 Project
-├── parts: list[PartGeometry]
-├── tools: list[Tool]              (references global ToolLibrary, editable per-project)
-├── operations: list[Operation]
+├── parts: Vec<PartGeometry>
+├── tools: Vec<Tool>              (references global ToolLibrary, editable per-project)
+├── operations: Vec<Operation>
 │     ├── wcs: WorkCoordinateSystem      (per-operation, supports multi-setup)
-│     ├── stock: StockDefinition | None  (optional, per-operation)
-│     └── toolpath: Toolpath (generated, not saved)
-│           └── segments: list[ToolpathSegment]
+│     ├── stock: Option<StockDefinition> (optional, per-operation)
+│     └── toolpath: Option<Toolpath>     (generated, not saved)
+│           └── segments: Vec<ToolpathSegment>
 └── history: CommandHistory        (undo/redo)
 ```
 
@@ -24,16 +24,17 @@ Project
 
 The root container. Serializable to/from JSON for project save/load.
 
-```python
-@dataclass
-class Project:
-    name: str
-    units: Units                      # MM or INCH
-    parts: list[PartGeometry]
-    tools: list[Tool]
-    operations: list[Operation]
-    history: CommandHistory            # Undo/redo log
-    post_processor_id: str | None     # Default post-processor for this project
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub name: String,
+    pub units: Units,
+    pub parts: Vec<PartGeometry>,
+    pub tools: Vec<Tool>,
+    pub operations: Vec<Operation>,
+    pub history: CommandHistory,
+    pub post_processor_id: Option<String>,  // Default post-processor for this project
+}
 ```
 
 ### WorkCoordinateSystem
@@ -42,12 +43,13 @@ Defines the machine work coordinate origin and orientation relative to the part 
 
 Operations sharing the same setup can reference the same WCS values. When operations are grouped into setups (future tree structure), the group defines the WCS and child operations inherit it.
 
-```python
-@dataclass
-class WorkCoordinateSystem:
-    origin: tuple[float, float, float]      # XYZ position relative to part origin
-    rotation: tuple[float, float, float]    # ABC rotation angles (degrees)
-    work_offset: str                        # G54-G59 (which offset register on the machine)
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkCoordinateSystem {
+    pub origin: [f64; 3],          // XYZ position relative to part origin
+    pub rotation: [f64; 3],        // ABC rotation angles (degrees)
+    pub work_offset: String,       // G54-G59 (which offset register on the machine)
+}
 ```
 
 **Default**: Part origin as-imported (0, 0, 0 position, no rotation, G54). The user can change this by:
@@ -63,57 +65,80 @@ Defines the raw material. **Not required** for toolpath generation — the opera
 - Rest machining (knowing what material remains)
 - Heidenhain `BLK FORM` output
 
-```python
-@dataclass
-class StockDefinition:
-    shape: StockShape                 # BOX or CYLINDER
-    width: float | None               # X dimension (box)
-    height: float | None              # Y dimension (box)
-    depth: float | None               # Z dimension (box)
-    diameter: float | None            # For cylindrical stock
-    length: float | None              # For cylindrical stock
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StockDefinition {
+    pub shape: StockShape,
+    pub width: Option<f64>,        // X dimension (box)
+    pub height: Option<f64>,       // Y dimension (box)
+    pub depth: Option<f64>,        // Z dimension (box)
+    pub diameter: Option<f64>,     // For cylindrical stock
+    pub length: Option<f64>,       // For cylindrical stock
+}
 
-class StockShape(Enum):
-    BOX = "box"
-    CYLINDER = "cylinder"
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StockShape {
+    Box,
+    Cylinder,
+}
 ```
 
 ### PartGeometry
 
 Wraps either a 3D mesh or a 2D contour set. Provides a uniform interface for toolpath generation.
 
-```python
-@dataclass
-class PartGeometry:
-    id: str                           # UUID
-    name: str                         # Display name (usually filename)
-    source_format: str                # "stl", "dxf", "svg", "step"
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartGeometry {
+    pub id: Uuid,
+    pub name: String,                      // Display name (usually filename)
+    pub source_format: String,             // "stl", "dxf", "svg", "step"
 
-    # 3D representation (from STL/STEP)
-    mesh: trimesh.Trimesh | None
+    // 3D representation (from STL/STEP)
+    #[serde(skip)]
+    pub mesh: Option<TriMesh>,             // Triangle mesh (vertices + indices)
 
-    # 2D representation (from DXF/SVG, or sliced from mesh)
-    contours_2d: shapely.MultiPolygon | None
+    // 2D representation (from DXF/SVG, or sliced from mesh)
+    #[serde(skip)]
+    pub contours_2d: Option<MultiPolygon>, // geo::MultiPolygon
 
-    # Transform applied to the imported geometry
-    transform: np.ndarray             # 4x4 homogeneous transform matrix
+    // Transform applied to the imported geometry
+    pub transform: [[f64; 4]; 4],          // 4x4 homogeneous transform matrix
 
-    # Provenance — where the geometry came from (see 08-integrations.md)
-    provenance: PartProvenance | None  # None for legacy/unknown imports
+    // Provenance — where the geometry came from (see 08-integrations.md)
+    pub provenance: Option<PartProvenance>,
 
-    # Update history — tracks geometry changes over time (see 09-part-update.md)
-    update_history: list[PartUpdate]  # Append-only log of updates
-
-    def get_contour_at_z(self, z: float) -> shapely.MultiPolygon:
-        """Slice the 3D mesh at height z, or return 2D contours."""
-        ...
-
-    def bounding_box(self) -> BoundingBox:
-        """Axis-aligned bounding box in world coordinates."""
-        ...
+    // Update history — tracks geometry changes over time (see 09-part-update.md)
+    pub update_history: Vec<PartUpdate>,
+}
 ```
 
-**Design note**: The `get_contour_at_z()` method is the key abstraction that lets toolpath generators work identically on both 3D meshes and 2D drawings. For 2D imports, this returns the same contours regardless of Z. For 3D meshes, it slices using `trimesh.section()` and converts the result to Shapely geometry.
+The `PartGeometry` type provides key methods:
+
+```rust
+impl PartGeometry {
+    /// Slice the 3D mesh at height z, or return 2D contours.
+    pub fn get_contour_at_z(&self, z: f64) -> MultiPolygon { ... }
+
+    /// Axis-aligned bounding box in world coordinates.
+    pub fn bounding_box(&self) -> BoundingBox { ... }
+}
+```
+
+**Design note**: The `get_contour_at_z()` method is the key abstraction that lets toolpath generators work identically on both 3D meshes and 2D drawings. For 2D imports, this returns the same contours regardless of Z. For 3D meshes, it slices the triangle mesh at the given Z height and converts the cross-section to `geo::MultiPolygon`.
+
+### TriMesh
+
+Internal triangle mesh representation used for 3D geometry.
+
+```rust
+#[derive(Debug, Clone)]
+pub struct TriMesh {
+    pub vertices: Vec<[f64; 3]>,
+    pub normals: Vec<[f64; 3]>,    // Per-vertex normals
+    pub indices: Vec<[u32; 3]>,     // Triangle indices
+}
+```
 
 ### Tool
 
@@ -121,36 +146,41 @@ Defines a cutting tool's physical geometry and recommended cutting data. The rec
 
 Tools are stored in a **global library** (persistent across projects). When added to a project, they are copied in and can be edited per-project without affecting the global library.
 
-```python
-class ToolType(Enum):
-    END_MILL = "end_mill"
-    BALL_NOSE = "ball_nose"
-    V_BIT = "v_bit"
-    DRILL = "drill"
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolType {
+    EndMill,
+    BallNose,
+    VBit,
+    Drill,
+}
 
-class CoolantMode(Enum):
-    OFF = "off"
-    FLOOD = "flood"               # M8
-    MIST = "mist"                 # M7
-    THROUGH_TOOL = "through_tool" # M88 or controller-specific
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CoolantMode {
+    Off,
+    Flood,         // M8
+    Mist,          // M7
+    ThroughTool,   // M88 or controller-specific
+}
 
-@dataclass
-class Tool:
-    id: str
-    name: str                         # e.g. "6mm 2-flute end mill"
-    type: ToolType
-    diameter: float                   # Cutting diameter
-    flute_length: float               # Maximum depth of cut
-    total_length: float
-    num_flutes: int
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tool {
+    pub id: Uuid,
+    pub name: String,                              // e.g. "6mm 2-flute end mill"
+    pub tool_type: ToolType,
+    pub diameter: f64,                             // Cutting diameter
+    pub flute_length: f64,                         // Maximum depth of cut
+    pub total_length: f64,
+    pub num_flutes: u32,
 
-    # Recommended cutting data (auto-populates operations, user can override)
-    recommended_feed_rate: float | None       # mm/min
-    recommended_plunge_rate: float | None
-    recommended_spindle_speed: float | None   # RPM
-    recommended_depth_per_pass: float | None
-    recommended_stepover: float | None        # Fraction of diameter (0.0-1.0)
-    recommended_coolant: CoolantMode | None
+    // Recommended cutting data (auto-populates operations, user can override)
+    pub recommended_feed_rate: Option<f64>,         // mm/min
+    pub recommended_plunge_rate: Option<f64>,
+    pub recommended_spindle_speed: Option<f64>,     // RPM
+    pub recommended_depth_per_pass: Option<f64>,
+    pub recommended_stepover: Option<f64>,          // Fraction of diameter (0.0-1.0)
+    pub recommended_coolant: Option<CoolantMode>,
+}
 ```
 
 **Workflow**: When the user selects a tool for an operation, the operation's cutting parameters are pre-filled from the tool's recommended values. The user can then adjust any value. Once overridden, changing the tool doesn't overwrite the user's edits — only empty/unset fields are populated.
@@ -159,110 +189,121 @@ class Tool:
 
 Global tool library stored server-side, independent of any project.
 
-```python
-@dataclass
-class ToolLibrary:
-    tools: list[Tool]
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolLibrary {
+    pub tools: Vec<Tool>,
+}
 ```
 
 API: `GET/POST/PUT/DELETE /api/tools` (global library, separate from project tools).
 
 ### Operation
 
-Represents a machining operation. Each subclass knows how to generate its toolpath.
+Represents a machining operation. Each type knows how to generate its toolpath.
 
-```python
-class OperationType(Enum):
-    FACING = "facing"
-    PROFILE = "profile"
-    POCKET = "pocket"
-    DRILL = "drill"
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OperationType {
+    Facing,
+    Profile,
+    Pocket,
+    Drill,
+}
 
-class CutDirection(Enum):
-    CLIMB = "climb"             # Preferred for CNC
-    CONVENTIONAL = "conventional"
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CutDirection {
+    Climb,          // Preferred for CNC
+    Conventional,
+}
 
-class ProfileSide(Enum):
-    OUTSIDE = "outside"
-    INSIDE = "inside"
-    ON = "on"                   # Cut on the line (no offset)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProfileSide {
+    Outside,
+    Inside,
+    On,             // Cut on the line (no offset)
+}
 
-class CompensationMode(Enum):
-    CAM = "cam"                 # CAM computes offset toolpath (tool center follows pre-offset path)
-    CONTROLLER = "controller"   # CAM outputs geometry path, controller applies G41/G42
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CompensationMode {
+    Cam,            // CAM computes offset toolpath (tool center follows pre-offset path)
+    Controller,     // CAM outputs geometry path, controller applies G41/G42
+}
 
-@dataclass
-class Operation:
-    id: str
-    name: str
-    type: OperationType
-    enabled: bool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Operation {
+    pub id: Uuid,
+    pub name: String,
+    pub operation_type: OperationType,
+    pub enabled: bool,
 
-    # Optional at the machine (see 03-nc-and-postprocessors.md "Optional Operations")
-    optional: bool                # If True, operator can skip this at the machine
-    skip_level: int               # 1-9, maps to block delete level or jump variable
+    // Optional at the machine (see 03-nc-and-postprocessors.md "Optional Operations")
+    pub optional: bool,            // If true, operator can skip this at the machine
+    pub skip_level: u8,            // 1-9, maps to block delete level or jump variable
 
-    # References
-    geometry_id: str              # Which PartGeometry to machine
-    tool_id: str                  # Which Tool to use
+    // References
+    pub geometry_id: Uuid,         // Which PartGeometry to machine
+    pub tool_id: Uuid,             // Which Tool to use
 
-    # Coordinate system & stock (per-operation, supports multi-setup parts)
-    wcs: WorkCoordinateSystem     # WCS for this operation
-    stock: StockDefinition | None # Optional, for optimization/simulation
+    // Coordinate system & stock (per-operation, supports multi-setup parts)
+    pub wcs: WorkCoordinateSystem,
+    pub stock: Option<StockDefinition>,
 
-    # Cutting parameters (pre-filled from tool recommendations, user can override)
-    feed_rate: float              # mm/min or in/min — XY cutting feed
-    plunge_rate: float            # Feed rate for Z plunges
-    spindle_speed: float          # RPM
-    depth_per_pass: float         # Maximum Z step per pass
-    start_depth: float            # Z start (usually 0 = WCS Z zero)
-    final_depth: float            # Z end (negative = into material)
-    coolant: CoolantMode          # Coolant mode for this operation
+    // Cutting parameters (pre-filled from tool recommendations, user can override)
+    pub feed_rate: f64,            // mm/min or in/min — XY cutting feed
+    pub plunge_rate: f64,          // Feed rate for Z plunges
+    pub spindle_speed: f64,        // RPM
+    pub depth_per_pass: f64,       // Maximum Z step per pass
+    pub start_depth: f64,          // Z start (usually 0 = WCS Z zero)
+    pub final_depth: f64,          // Z end (negative = into material)
+    pub coolant: CoolantMode,
 
-    # Machine control
-    stop_before: str | None       # "M0" (mandatory stop) or "M1" (optional stop) before this op
-    stop_after: str | None        # "M0" or "M1" after this op
+    // Machine control
+    pub stop_before: Option<String>,  // "M0" (mandatory stop) or "M1" (optional stop)
+    pub stop_after: Option<String>,
 
-    # Type-specific parameters (set based on operation type)
-    # Facing
-    stepover: float | None        # As fraction of tool diameter (0.0-1.0)
+    // Type-specific parameters (set based on operation type)
+    // Facing
+    pub stepover: Option<f64>,                    // Fraction of tool diameter (0.0-1.0)
 
-    # Profile
-    profile_side: ProfileSide | None
-    cut_direction: CutDirection | None
-    compensation: CompensationMode | None  # CAM offset vs controller G41/G42
-    tabs_enabled: bool
-    tab_width: float | None
-    tab_height: float | None
-    lead_in_radius: float | None
+    // Profile
+    pub profile_side: Option<ProfileSide>,
+    pub cut_direction: Option<CutDirection>,
+    pub compensation: Option<CompensationMode>,   // CAM offset vs controller G41/G42
+    pub tabs_enabled: bool,
+    pub tab_width: Option<f64>,
+    pub tab_height: Option<f64>,
+    pub lead_in_radius: Option<f64>,
 
-    # Pocket
-    pocket_stepover: float | None
-    pocket_strategy: str | None   # "contour_parallel" or "zigzag"
+    // Pocket
+    pub pocket_stepover: Option<f64>,
+    pub pocket_strategy: Option<String>,          // "contour_parallel" or "zigzag"
 
-    # Canned cycles (future — see 03-nc-and-postprocessors.md)
-    use_canned_cycle: bool        # Default: False. Emit cycle blocks if post-processor supports it.
+    // Canned cycles (future — see 03-nc-and-postprocessors.md)
+    pub use_canned_cycle: bool,    // Default: false. Emit cycle blocks if post-processor supports it.
 
-    # Computed output
-    toolpath: Toolpath | None     # Generated, not serialized
+    // Computed output
+    #[serde(skip)]
+    pub toolpath: Option<Toolpath>,
+}
 ```
 
-**Alternative considered**: Using separate dataclasses per operation type (FacingOperation, ProfileOperation, etc.). Decided against it because a single type is simpler for serialization, API contracts, and the operations panel UI. Type-specific fields are simply None when not applicable.
+**Alternative considered**: Using separate structs per operation type (FacingOperation, ProfileOperation, etc.) or a Rust enum with per-variant data. Decided on a single struct because it simplifies serialization, API contracts, and the operations panel UI. Type-specific fields are simply `None` when not applicable.
 
 ### Cutter Compensation: CAM vs Controller
 
 Operations that involve tool radius offset (profile, pocket walls) support two compensation modes:
 
-- **`CAM` mode** (default): The CAM software computes the offset toolpath. The NC code contains the tool center coordinates — the controller simply follows them. This is the safest and most portable approach. Suitable for roughing where exact tool diameter matters less, and for controllers without cutter compensation support (e.g., Grbl).
+- **`Cam` mode** (default): The CAM software computes the offset toolpath. The NC code contains the tool center coordinates — the controller simply follows them. This is the safest and most portable approach. Suitable for roughing where exact tool diameter matters less, and for controllers without cutter compensation support (e.g., Grbl).
 
 - **`Controller` mode**: The CAM software outputs the **geometry path** (the actual part contour). The NC code includes `G41` (left offset) or `G42` (right offset) commands, and the controller applies the tool radius from its tool table at runtime. This allows the operator to fine-tune the tool diameter on the machine (e.g., to account for tool wear) without regenerating toolpaths. Ideal for finishing passes where dimensional accuracy matters.
 
 **Implications for toolpath generation**:
-- In `CAM` mode: `toolpath/profile.py` offsets the contour by `tool_diameter / 2` and emits tool-center coordinates.
-- In `Controller` mode: `toolpath/profile.py` emits the original contour coordinates. The NC compiler adds `G41`/`G42` with a `D` word referencing the tool offset register. A lead-in move is **required** (controller needs a linear move to ramp into compensation).
+- In `Cam` mode: `toolpath/profile.rs` offsets the contour by `tool_diameter / 2` and emits tool-center coordinates.
+- In `Controller` mode: `toolpath/profile.rs` emits the original contour coordinates. The NC compiler adds `G41`/`G42` with a `D` word referencing the tool offset register. A lead-in move is **required** (controller needs a linear move to ramp into compensation).
 
 **Implications for NC compilation**:
-- `nc/compiler.py` checks the operation's compensation mode. For `Controller` mode, it emits:
+- `nc/compiler.rs` checks the operation's compensation mode. For `Controller` mode, it emits:
   - `G41 D01` (or `G42 D01`) before the contour
   - The contour path at geometry coordinates (not offset)
   - `G40` to cancel compensation after the contour
@@ -271,81 +312,90 @@ Operations that involve tool radius offset (profile, pocket walls) support two c
   - Heidenhain: `RL` / `RR` / `R0` appended to the move line (compensation is part of the move command, not a separate block — the Heidenhain post-processor merges the COMP block with the next LINEAR/ARC block)
 
 **Typical usage pattern**:
-- Roughing pass: `CompensationMode.CAM` with a stock-to-leave allowance
-- Finishing pass: `CompensationMode.CONTROLLER` so the operator can dial in the exact dimension
+- Roughing pass: `CompensationMode::Cam` with a stock-to-leave allowance
+- Finishing pass: `CompensationMode::Controller` so the operator can dial in the exact dimension
 
 ### Toolpath
 
 The result of toolpath generation. A sequence of segments that describe the tool's movement.
 
-```python
-class MoveType(Enum):
-    RAPID = "rapid"               # G0 — fast non-cutting move
-    LINEAR = "linear"             # G1 — straight cutting move
-    ARC_CW = "arc_cw"            # G2 — clockwise arc
-    ARC_CCW = "arc_ccw"          # G3 — counter-clockwise arc
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MoveType {
+    Rapid,      // G0 — fast non-cutting move
+    Linear,     // G1 — straight cutting move
+    ArcCw,      // G2 — clockwise arc
+    ArcCcw,     // G3 — counter-clockwise arc
+}
 
-@dataclass
-class ToolpathSegment:
-    move_type: MoveType
-    x: float
-    y: float
-    z: float
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolpathSegment {
+    pub move_type: MoveType,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
 
-    # Arc-specific (None for rapid/linear)
-    i: float | None               # Arc center X offset from start
-    j: float | None               # Arc center Y offset from start
+    // Arc-specific (None for rapid/linear)
+    pub i: Option<f64>,     // Arc center X offset from start
+    pub j: Option<f64>,     // Arc center Y offset from start
 
-    # Cutting parameters (None for rapids)
-    feed_rate: float | None
+    // Cutting parameters (None for rapids)
+    pub feed_rate: Option<f64>,
+}
 
-@dataclass
-class Toolpath:
-    operation_id: str
-    segments: list[ToolpathSegment]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Toolpath {
+    pub operation_id: Uuid,
+    pub segments: Vec<ToolpathSegment>,
 
-    # Computed metadata
-    total_distance: float         # Total tool travel
-    cutting_distance: float       # Feed moves only
-    estimated_time: float         # Based on feed rates
-    bounding_box: BoundingBox
+    // Computed metadata
+    pub total_distance: f64,      // Total tool travel
+    pub cutting_distance: f64,    // Feed moves only
+    pub estimated_time: f64,      // Based on feed rates
+    pub bounding_box: BoundingBox,
+}
 ```
 
 ### Supporting Types
 
-```python
-class Units(Enum):
-    MM = "mm"
-    INCH = "inch"
+```rust
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum Units {
+    Mm,
+    Inch,
+}
 
-@dataclass
-class BoundingBox:
-    min_x: float
-    min_y: float
-    min_z: float
-    max_x: float
-    max_y: float
-    max_z: float
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct BoundingBox {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
 ```
 
 ## Undo/Redo (Command History)
 
 Every mutation to the project is recorded as a command in a persistent, append-only history log. This enables unlimited undo/redo that survives across sessions.
 
-```python
-@dataclass
-class Command:
-    id: str
-    timestamp: str                    # ISO 8601
-    type: str                         # e.g. "add_operation", "update_operation", "delete_tool", ...
-    description: str                  # Human-readable, e.g. "Added facing operation"
-    forward_patch: dict               # JSON patch to apply (redo)
-    reverse_patch: dict               # JSON patch to undo
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Command {
+    pub id: Uuid,
+    pub timestamp: String,                 // ISO 8601
+    pub command_type: String,              // e.g. "add_operation", "update_operation", "delete_tool"
+    pub description: String,               // Human-readable, e.g. "Added facing operation"
+    pub forward_patch: serde_json::Value,  // JSON patch to apply (redo)
+    pub reverse_patch: serde_json::Value,  // JSON patch to undo
+}
 
-@dataclass
-class CommandHistory:
-    commands: list[Command]           # Full history, oldest first
-    cursor: int                       # Current position (index of next redo)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandHistory {
+    pub commands: Vec<Command>,            // Full history, oldest first
+    pub cursor: usize,                     // Current position (index of next redo)
+}
 ```
 
 **How it works**:
@@ -402,9 +452,9 @@ When the frontend requests mesh data for Three.js rendering, the backend returns
 
 ```json
 {
-  "vertices": [x0, y0, z0, x1, y1, z1, ...],  // flat Float32 array
-  "normals": [nx0, ny0, nz0, ...],              // per-vertex normals
-  "indices": [i0, i1, i2, ...]                   // triangle indices
+  "vertices": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, ...],
+  "normals": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, ...],
+  "indices": [0, 1, 2, ...]
 }
 ```
 

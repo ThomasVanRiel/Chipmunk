@@ -4,90 +4,105 @@
 
 NC code generation is a two-stage process:
 
-1. **Compilation**: Toolpath segments → controller-neutral `NCBlock` intermediate representation
-2. **Post-processing**: `NCBlock` list → machine-specific G-code string
+1. **Compilation** (Rust): Toolpath segments → controller-neutral `NCBlock` intermediate representation
+2. **Post-processing** (Python): `NCBlock` list → machine-specific NC code string
 
-This separation means toolpath generators never need to know about G-code dialects, and post-processors never need to know about machining strategies.
+This separation means toolpath generators never need to know about G-code dialects, and post-processors never need to know about machining strategies. The Rust/Python boundary sits between these two stages, connected via PyO3.
 
 ## Intermediate Representation (IR)
 
-### NCBlock
+The IR is defined in Rust (`src/nc/ir.rs`) and mirrored as Python types for the post-processor side.
+
+### NCBlock (Rust)
 
 The atomic unit of NC output. Each block represents one logical instruction.
 
-```python
-class BlockType(Enum):
-    COMMENT = "comment"
-    RAPID = "rapid"                 # G0
-    LINEAR = "linear"               # G1
-    ARC_CW = "arc_cw"              # G2
-    ARC_CCW = "arc_ccw"            # G3
-    TOOL_CHANGE = "tool_change"     # M6
-    SPINDLE_ON = "spindle_on"       # M3/M4
-    SPINDLE_OFF = "spindle_off"     # M5
-    COOLANT_ON = "coolant_on"       # M8/M7
-    COOLANT_OFF = "coolant_off"     # M9
-    DWELL = "dwell"                 # G4
-    STOP = "stop"                   # M0 — mandatory program stop
-    OPTIONAL_STOP = "optional_stop" # M1 — optional stop (operator switch)
-    PROGRAM_END = "program_end"     # M30/M2
-    SET_UNITS = "set_units"         # G20/G21
-    SET_WORK_OFFSET = "set_work_offset"  # G54-G59
-    SET_PLANE = "set_plane"         # G17/G18/G19
-    SET_MODE = "set_mode"           # G90/G91 (absolute/incremental)
-    SET_FEED_MODE = "set_feed_mode" # G94/G95 (per-minute/per-rev)
-    COMP_LEFT = "comp_left"         # G41 — cutter compensation left
-    COMP_RIGHT = "comp_right"       # G42 — cutter compensation right
-    COMP_OFF = "comp_off"           # G40 — cancel cutter compensation
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BlockType {
+    Comment,
+    Rapid,               // G0
+    Linear,              // G1
+    ArcCw,               // G2
+    ArcCcw,              // G3
+    ToolChange,          // M6
+    SpindleOn,           // M3/M4
+    SpindleOff,          // M5
+    CoolantOn,           // M8/M7
+    CoolantOff,          // M9
+    Dwell,               // G4
+    Stop,                // M0 — mandatory program stop
+    OptionalStop,        // M1 — optional stop (operator switch)
+    ProgramEnd,          // M30/M2
+    SetUnits,            // G20/G21
+    SetWorkOffset,       // G54-G59
+    SetPlane,            // G17/G18/G19
+    SetMode,             // G90/G91 (absolute/incremental)
+    SetFeedMode,         // G94/G95 (per-minute/per-rev)
+    CompLeft,            // G41 — cutter compensation left
+    CompRight,           // G42 — cutter compensation right
+    CompOff,             // G40 — cancel cutter compensation
 
-    # Canned cycles (future — see "Canned Cycles" section below)
-    CYCLE_DEFINE = "cycle_define"   # Define a cycle with parameters
-    CYCLE_CALL = "cycle_call"       # Execute the defined cycle at a position
-    CYCLE_OFF = "cycle_off"         # Cancel active cycle
+    // Canned cycles (future — see "Canned Cycles" section below)
+    CycleDefine,         // Define a cycle with parameters
+    CycleCall,           // Execute the defined cycle at a position
+    CycleOff,            // Cancel active cycle
 
-    # Optional operation skip (see "Optional Operations" section below)
-    OPTIONAL_SKIP_START = "optional_skip_start"  # Start of skippable section
-    OPTIONAL_SKIP_END = "optional_skip_end"      # End of skippable section
+    // Optional operation skip (see "Optional Operations" section below)
+    OptionalSkipStart,   // Start of skippable section
+    OptionalSkipEnd,     // End of skippable section
+}
 
-@dataclass
-class NCBlock:
-    type: BlockType
-    params: dict[str, float | str]
-    # Params vary by type:
-    # RAPID/LINEAR: X, Y, Z, F (feed)
-    # ARC_CW/CCW: X, Y, Z, I, J, K, F
-    # TOOL_CHANGE: T (tool number), tool_name
-    # SPINDLE_ON: S (speed), direction ("cw"/"ccw")
-    # DWELL: P (seconds)
-    # COMMENT: text
-    # SET_UNITS: units ("mm"/"inch")
-    # SET_WORK_OFFSET: offset ("G54"/"G55"/...)
-    # COMP_LEFT/RIGHT: D (offset register number)
-    # OPTIONAL_SKIP_START: skip_level (1-9), label (str), operation_name (str)
-    # OPTIONAL_SKIP_END: skip_level (1-9), label (str)
-    # COMP_OFF: (no params)
-    # CYCLE_DEFINE: cycle_type, + cycle-specific params (see Canned Cycles section)
-    # CYCLE_CALL: X, Y (position to execute cycle at)
-    # CYCLE_OFF: (no params)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NCBlock {
+    pub block_type: BlockType,
+    pub params: HashMap<String, serde_json::Value>,
+    // Params vary by type:
+    // Rapid/Linear: X, Y, Z, F (feed)
+    // ArcCw/Ccw: X, Y, Z, I, J, K, F
+    // ToolChange: T (tool number), tool_name
+    // SpindleOn: S (speed), direction ("cw"/"ccw")
+    // Dwell: P (seconds)
+    // Comment: text
+    // SetUnits: units ("mm"/"inch")
+    // SetWorkOffset: offset ("G54"/"G55"/...)
+    // CompLeft/Right: D (offset register number)
+    // OptionalSkipStart: skip_level (1-9), label, operation_name
+    // OptionalSkipEnd: skip_level (1-9), label
+    // CompOff: (no params)
+    // CycleDefine: cycle_type, + cycle-specific params
+    // CycleCall: X, Y (position to execute cycle at)
+    // CycleOff: (no params)
+}
 ```
 
-### Compiler
+### NCBlock (Python mirror)
+
+The Python-side mirror is defined in `postprocessors/src/camproject_post/base.py`. PyO3 converts Rust `NCBlock` structs into these Python objects before passing them to the post-processor.
+
+```python
+@dataclass
+class NCBlock:
+    block_type: str       # e.g. "rapid", "linear", "tool_change"
+    params: dict[str, Any]
+```
+
+### Compiler (Rust)
 
 The compiler transforms a list of `Toolpath` objects (from one or more operations) into a complete NC program as a list of `NCBlock`:
 
-```python
-def compile_program(
-    operations: list[Operation],
-    project: Project,
-) -> list[NCBlock]:
-    """
-    Compile operations into a complete NC program.
-
-    Inserts:
-    - Program start (units, work offset, absolute mode)
-    - For each operation: tool change, spindle on, coolant, toolpath, spindle off
-    - Program end
-    """
+```rust
+pub fn compile_program(
+    operations: &[Operation],
+    project: &Project,
+) -> Vec<NCBlock> {
+    // Compile operations into a complete NC program.
+    //
+    // Inserts:
+    // - Program start (units, work offset, absolute mode)
+    // - For each operation: tool change, spindle on, coolant, toolpath, spindle off
+    // - Program end
+}
 ```
 
 **Compilation order**:
@@ -109,7 +124,7 @@ def compile_program(
 
 ## Post-Processor System
 
-### PostProcessor ABC
+### PostProcessor ABC (Python)
 
 ```python
 from abc import ABC, abstractmethod
@@ -181,10 +196,43 @@ class PostProcessor(ABC):
 class ProgramContext:
     """Metadata passed to post-processors for header/footer generation."""
     project_name: str
-    units: Units
+    units: str            # "mm" or "inch"
     num_tools: int
     date: str
     estimated_time_min: float | None
+```
+
+### PyO3 Bridge
+
+The `nc/bridge.rs` module handles the Rust → Python → Rust roundtrip:
+
+1. **Initialization**: On first use, PyO3 starts an embedded Python interpreter
+2. **Discovery**: Calls `importlib.metadata.entry_points(group="camproject.postprocessors")` to find installed post-processors
+3. **Conversion**: Converts `Vec<NCBlock>` to a Python list of `NCBlock` objects (using the Python-side `NCBlock` dataclass)
+4. **Execution**: Instantiates the selected `PostProcessor` subclass and calls `generate(blocks, context)`
+5. **Result**: Returns the NC code `String` back to Rust
+
+```rust
+// nc/bridge.rs (simplified)
+pub fn list_postprocessors() -> Result<Vec<PostProcessorInfo>> {
+    Python::with_gil(|py| {
+        // Call importlib.metadata.entry_points(group="camproject.postprocessors")
+        // Return name, file extension for each
+    })
+}
+
+pub fn generate_nc_code(
+    blocks: &[NCBlock],
+    context: &ProgramContext,
+    postprocessor_id: &str,
+) -> Result<String> {
+    Python::with_gil(|py| {
+        // 1. Convert NCBlocks to Python objects
+        // 2. Load the post-processor class via entry point
+        // 3. Call post.generate(blocks, context)
+        // 4. Return the resulting string
+    })
+}
 ```
 
 ### Built-in Post-Processors
@@ -285,20 +333,20 @@ Heidenhain uses **conversational programming**, a completely different syntax fr
 
 ### Plugin Discovery
 
-Post-processors are discovered at runtime via Python entry points:
+Post-processors are discovered at runtime via Python entry points. The Rust side calls into Python via PyO3 to discover and instantiate them.
 
 ```toml
-# In pyproject.toml of the main project or any plugin package:
+# In pyproject.toml of the main post-processor package or any plugin package:
 [project.entry-points."camproject.postprocessors"]
-linuxcnc = "camproject.postprocessors.linuxcnc:LinuxCNCPost"
-grbl = "camproject.postprocessors.grbl:GrblPost"
+linuxcnc = "camproject_post.linuxcnc:LinuxCNCPost"
+grbl = "camproject_post.grbl:GrblPost"
 ```
 
 ```python
-# nc/registry.py
+# Discovery (called from Rust via PyO3)
 from importlib.metadata import entry_points
 
-def discover_postprocessors() -> dict[str, type[PostProcessor]]:
+def discover_postprocessors() -> dict[str, type]:
     """Discover all registered post-processors."""
     eps = entry_points(group="camproject.postprocessors")
     return {ep.name: ep.load() for ep in eps}
@@ -308,13 +356,13 @@ def discover_postprocessors() -> dict[str, type[PostProcessor]]:
 
 A third-party package can provide a custom post-processor by:
 
-1. Creating a class that extends `PostProcessor`
+1. Creating a class that extends `PostProcessor` (from `camproject_post.base`)
 2. Registering it as an entry point in their `pyproject.toml`
-3. Installing the package into the same Python environment
+3. Installing the package into the Python environment used by CAMproject
 
 ```python
 # my_custom_post/haas.py
-from camproject.nc.base import PostProcessor, NCBlock, ProgramContext
+from camproject_post.base import PostProcessor, NCBlock, ProgramContext
 
 class HaasPost(PostProcessor):
     @property
@@ -345,8 +393,8 @@ Canned cycles let the controller handle repetitive motion patterns internally ra
 The approach is a **dual-path** design:
 
 1. **Toolpath generators always produce explicit moves** (rapid/linear/arc segments). This is the universal fallback that works on every controller.
-2. **The NC compiler optionally recognizes cycle-eligible patterns** and emits `CYCLE_DEFINE` / `CYCLE_CALL` blocks instead of explicit moves, when the target post-processor declares cycle support.
-3. **Post-processors that don't support cycles** (e.g., Grbl) ignore `CYCLE_DEFINE`/`CYCLE_CALL` and fall back to the expanded moves. The compiler emits both forms: the cycle blocks and the equivalent explicit blocks wrapped in a `CYCLE_EXPANDED` group that the post-processor can choose between.
+2. **The NC compiler optionally recognizes cycle-eligible patterns** and emits `CycleDefine` / `CycleCall` blocks instead of explicit moves, when the target post-processor declares cycle support.
+3. **Post-processors that don't support cycles** (e.g., Grbl) ignore `CycleDefine`/`CycleCall` and fall back to the expanded moves. The compiler emits both forms: the cycle blocks and the equivalent explicit blocks wrapped in a `CYCLE_EXPANDED` group that the post-processor can choose between.
 
 ```python
 class PostProcessor(ABC):
@@ -364,20 +412,20 @@ class PostProcessor(ABC):
 
 ### Cycle Types in the IR
 
-```python
-# CYCLE_DEFINE params by cycle_type:
+```
+CYCLE_DEFINE params by cycle_type:
 
-# Drilling cycles
-# cycle_type="drill":         Z (final depth), R (retract plane), F (feed)
-# cycle_type="peck_drill":    Z, R, F, Q (peck increment)
-# cycle_type="spot_drill":    Z, R, F
-# cycle_type="bore":          Z, R, F, P (dwell at bottom)
-# cycle_type="tap":           Z, R, F, pitch
+Drilling cycles:
+  cycle_type="drill":         Z (final depth), R (retract plane), F (feed)
+  cycle_type="peck_drill":    Z, R, F, Q (peck increment)
+  cycle_type="spot_drill":    Z, R, F
+  cycle_type="bore":          Z, R, F, P (dwell at bottom)
+  cycle_type="tap":           Z, R, F, pitch
 
-# Milling cycles (more complex — controller-specific)
-# cycle_type="contour_pocket":   Z, R, F, stepover, finish_allowance
-# cycle_type="contour_profile":  Z, R, F, approach_type
-# cycle_type="face_mill":        Z, R, F, stepover, width, length
+Milling cycles (more complex — controller-specific):
+  cycle_type="contour_pocket":   Z, R, F, stepover, finish_allowance
+  cycle_type="contour_profile":  Z, R, F, approach_type
+  cycle_type="face_mill":        Z, R, F, stepover, width, length
 ```
 
 ### How Post-Processors Format Cycles
@@ -440,20 +488,20 @@ Heidenhain also supports milling cycles that G-code controllers typically don't 
 
 ### Operation-Level Cycle Control
 
-Operations get an optional `use_canned_cycle` field:
+Operations have an optional `use_canned_cycle` field:
 
-```python
-@dataclass
-class Operation:
-    # ...existing fields...
-    use_canned_cycle: bool  # Default: False. When True, compiler emits cycle blocks
-                            # if the post-processor supports the relevant cycle type.
+```rust
+pub struct Operation {
+    // ...existing fields...
+    pub use_canned_cycle: bool,  // Default: false. When true, compiler emits cycle blocks
+                                 // if the post-processor supports the relevant cycle type.
+}
 ```
 
-When `use_canned_cycle` is `True`:
+When `use_canned_cycle` is `true`:
 1. The compiler checks if the post-processor supports the relevant cycle type
-2. If supported: emits `CYCLE_DEFINE` + `CYCLE_CALL` blocks
-3. If not supported: falls back to explicit moves (same as `use_canned_cycle=False`)
+2. If supported: emits `CycleDefine` + `CycleCall` blocks
+3. If not supported: falls back to explicit moves (same as `use_canned_cycle=false`)
 
 This gives the user explicit control — they can choose whether the CAM or the controller handles the pattern, and the system gracefully degrades when the target controller doesn't support the cycle.
 
@@ -465,7 +513,7 @@ Canned cycle support is planned for later phases:
 
 ## Optional Operations
 
-Operations can be marked `optional=True` so the machine operator can skip them at runtime without editing the NC program. This is common for finishing passes, deburring, engraving, or chamfering that may not be needed on every part.
+Operations can be marked `optional=true` so the machine operator can skip them at runtime without editing the NC program. This is common for finishing passes, deburring, engraving, or chamfering that may not be needed on every part.
 
 ### Skip Levels
 
@@ -480,7 +528,7 @@ Each optional operation has a `skip_level` (1-9). Operations with the same skip 
 
 ### How Post-Processors Implement It
 
-The NC compiler wraps optional operations in `OPTIONAL_SKIP_START` / `OPTIONAL_SKIP_END` blocks. Each post-processor translates these to its native skip mechanism.
+The NC compiler wraps optional operations in `OptionalSkipStart` / `OptionalSkipEnd` blocks. Each post-processor translates these to its native skip mechanism.
 
 #### Strategy 1: Block Delete (`/`)
 
@@ -620,23 +668,23 @@ N100 (skip target)
 
 ### Compiler Behavior
 
-When the compiler encounters an operation with `optional=True`:
+When the compiler encounters an operation with `optional == true`:
 
-1. Emit `OPTIONAL_SKIP_START` block with `skip_level` and a label name derived from the operation name
+1. Emit `OptionalSkipStart` block with `skip_level` and a label name derived from the operation name
 2. Emit all the operation's NCBlocks (tool change, spindle, toolpath, etc.)
-3. Emit `OPTIONAL_SKIP_END` block
+3. Emit `OptionalSkipEnd` block
 
 The post-processor's `format_blocks()` method handles these:
-- For block delete: sets an internal flag, prefixes subsequent lines with `/N` until `OPTIONAL_SKIP_END`
+- For block delete: sets an internal flag, prefixes subsequent lines with `/N` until `OptionalSkipEnd`
 - For jumps: emits the conditional jump + label pair
 
 ### Safety Considerations
 
 Skipping an operation at the machine must leave the machine in a safe state:
 
-- The compiler inserts a **safe Z retract** before `OPTIONAL_SKIP_START` so the tool is clear regardless of whether the section runs
-- After `OPTIONAL_SKIP_END`, the compiler re-establishes state: cancels any compensation (`G40`), cancels any active cycle (`G80`/`CYCL OFF`), rapids to safe Z
-- If the skipped operation included a tool change, the next operation must handle the fact that the tool may or may not have been changed — the compiler inserts a redundant `TOOL_CHANGE` after the optional section if needed
+- The compiler inserts a **safe Z retract** before `OptionalSkipStart` so the tool is clear regardless of whether the section runs
+- After `OptionalSkipEnd`, the compiler re-establishes state: cancels any compensation (`G40`), cancels any active cycle (`G80`/`CYCL OFF`), rapids to safe Z
+- If the skipped operation included a tool change, the next operation must handle the fact that the tool may or may not have been changed — the compiler inserts a redundant `ToolChange` after the optional section if needed
 
 ## Example Output
 

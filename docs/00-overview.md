@@ -16,17 +16,17 @@ A browser-based CAM (Computer-Aided Manufacturing) tool that generates NC code f
 └──────────────────────┬──────────────────────────────────┘
                        │ REST API + WebSocket
 ┌──────────────────────┴──────────────────────────────────┐
-│                  FastAPI Backend (Python)               │
+│                  Axum Backend (Rust)                     │
 │                                                         │
 │  ┌─────────┐  ┌──────────┐  ┌────┐  ┌───────────────┐   │
 │  │  api/   │→ │  core/   │→ │ nc/│→ │postprocessors/│   │
-│  │ routes  │  │ geometry │  │ IR │  │  linuxcnc     │   │
-│  │ websock │  │ tools    │  │comp│  │  grbl         │   │
-│  └─────────┘  │ ops      │  └────┘  │  fanuc        │   │
-│               └──────────┘          └───────────────┘   │
-│                    ↑                                    │
-│  ┌─────────┐  ┌──────────┐                              │
-│  │   io/   │  │toolpath/ │                              │
+│  │ routes  │  │ geometry │  │ IR │  │  (Python via  │   │
+│  │ websock │  │ tools    │  │comp│  │   PyO3)       │   │
+│  └─────────┘  │ ops      │  └────┘  │  linuxcnc     │   │
+│               └──────────┘          │  grbl          │   │
+│                    ↑                │  fanuc         │   │
+│  ┌─────────┐  ┌──────────┐          │  heidenhain    │   │
+│  │   io/   │  │toolpath/ │          └───────────────┘   │
 │  │ stl     │  │ slicer   │                              │
 │  │ dxf     │  │ offset   │                              │
 │  │ svg     │  │ facing   │                              │
@@ -36,32 +36,51 @@ A browser-based CAM (Computer-Aided Manufacturing) tool that generates NC code f
 └─────────────────────────────────────────────────────────┘
 ```
 
+## Hybrid Rust + Python Architecture
+
+The project uses a **Rust backend** for all performance-critical computation (geometry processing, toolpath generation, NC IR compilation, API serving) and **Python for post-processors** to maximize extensibility.
+
+**Why Rust for the backend?**
+- Computational geometry and toolpath generation are CPU-intensive — Rust's performance is a natural fit
+- Strong type system catches data model errors at compile time
+- Axum provides async HTTP + WebSocket with excellent performance
+- Memory safety without GC overhead
+
+**Why Python for post-processors?**
+- Post-processors are the most likely extension point for end users
+- Python is widely known in the CNC/manufacturing community
+- Custom post-processors often involve string formatting and controller-specific quirks — Python excels at this
+- Python entry_points provide a mature plugin discovery mechanism
+- PyO3 bridges Rust ↔ Python efficiently
+
+**The boundary**: Rust produces `NCBlock` IR (a list of structured blocks). Python post-processors receive this IR as Python objects (via PyO3) and format it into machine-specific NC code strings. The Rust side never generates G-code directly.
+
 ## Design Principles
 
 ### 1. Separation of Concerns
 
-`core/`, `toolpath/`, `nc/`, and `io/` have **zero web framework dependencies**. They are pure computational Python modules, independently testable without a running server or browser. The `api/` layer is a thin adapter between HTTP and the core logic.
+`core/`, `toolpath/`, `nc/`, and `io/` are pure computational Rust modules with no web framework dependencies. They are independently testable without a running server or browser. The `api/` module is a thin adapter between HTTP and the core logic.
 
 ### 2. Data Flow is Unidirectional
 
 ```
 File Import → PartGeometry → Operation (geometry + tool + params)
-    → Toolpath → NCBlock list → PostProcessor → NC code string
+    → Toolpath → NCBlock list → PostProcessor (Python) → NC code string
 ```
 
 Each stage is independently testable and produces a well-defined output.
 
 ### 3. Controller Agnosticism
 
-Toolpaths are generated as abstract segment sequences (rapid, linear, arc). These are compiled to a controller-neutral intermediate representation (`NCBlock` list). Only the final post-processor step formats machine-specific G-code.
+Toolpaths are generated as abstract segment sequences (rapid, linear, arc). These are compiled to a controller-neutral intermediate representation (`NCBlock` list). Only the final post-processor step formats machine-specific output.
 
 ### 4. Plugin Extensibility
 
-New operations (subclass `Operation`), new post-processors (subclass `PostProcessor`, register via entry point), new importers (add reader in `io/`), and new toolpath strategies (add module in `toolpath/`) can be added without modifying existing code.
+New post-processors are written in Python, registered via entry points, and discovered at runtime. New operation types, importers, and toolpath strategies are added as Rust modules.
 
 ### 5. No Singleton State
 
-The `Project` object is the root of all state. The server could theoretically serve multiple projects. All computation functions are pure (inputs → outputs).
+The `Project` struct is the root of all state. The server could theoretically serve multiple projects. All computation functions are pure (inputs → outputs).
 
 ### 6. Trust the Operator
 
@@ -75,18 +94,24 @@ Every change is persisted immediately server-side. There is no save button and n
 
 | Component | Choice | License | Rationale |
 |-----------|--------|---------|-----------|
-| Backend framework | FastAPI | MIT | Async, WebSocket support, modern Python |
-| 3D visualization | Three.js | MIT | Industry standard for browser 3D, excellent OrbitControls |
-| Frontend language | TypeScript | — | Type safety for API contracts, Three.js has good TS types |
-| STL/mesh handling | trimesh | MIT | Mature mesh library with slicing, bounding boxes, transforms |
-| 2D geometry | Shapely | BSD | GEOS-backed boolean ops, buffering, offsetting |
-| Polygon offset | pyclipr | MIT | Fast Clipper2 bindings for toolpath offset calculations |
-| DXF import | ezdxf | MIT | Full DXF version support, actively maintained |
-| SVG import | svgpathtools | MIT | SVG path parsing to Bezier segments |
-| STEP import | OCP/build123d | LGPL | OpenCascade wrapper, deferred (heavy ~300MB dep) |
-| Package manager | uv | MIT | Fast Python package/project manager, handles venv + deps + lockfile |
-| Python linting | ruff | MIT | Fast, replaces flake8+isort+black |
-| Testing | pytest | MIT | Standard Python testing |
+| Backend framework | axum | MIT | Async, WebSocket support, tower middleware, excellent Rust ecosystem |
+| Async runtime | tokio | MIT | Industry standard Rust async runtime |
+| Serialization | serde + serde_json | MIT | Standard Rust serialization |
+| HTTP client (integrations) | reqwest | MIT/Apache | Async HTTP client for Onshape API etc. |
+| STL import | stl_io / nom_stl | MIT | Fast STL parsing in Rust |
+| DXF import | dxf-rs | MIT/Apache | DXF file parsing |
+| SVG import | usvg | MPL-2.0 | SVG parsing and simplification |
+| STEP import | opencascade-rs | LGPL | OpenCascade Rust bindings (deferred, heavy dep) |
+| 2D geometry | geo + geo-clipper | MIT/Apache | Rust computational geometry with Clipper2 bindings |
+| Polygon offset | clipper2 (via geo-clipper) | BSL-1.0 | Fast polygon offsetting for toolpath compensation |
+| Mesh operations | Custom + parry3d | Apache | Mesh slicing, bounding boxes, transforms |
+| Linear algebra | nalgebra / glam | MIT/Apache | Vectors, matrices, transforms |
+| Python bridge | PyO3 + maturin | MIT/Apache | Rust ↔ Python FFI for post-processors |
+| Post-processor runtime | Python (embedded via PyO3) | — | Post-processor plugin execution |
+| Post-processor plugins | Python entry_points | — | Plugin discovery via importlib.metadata |
+| 3D visualization | Three.js | MIT | Industry standard for browser 3D |
+| Frontend language | TypeScript | — | Type safety for API contracts |
+| Frontend bundler | Vite | MIT | Fast HMR, TypeScript support |
 
 ## Why Browser-Based?
 

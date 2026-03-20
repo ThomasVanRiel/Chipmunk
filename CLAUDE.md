@@ -11,7 +11,8 @@ CAMproject is a browser-based CAM (Computer-Aided Manufacturing) tool for genera
 
 ## Architecture
 
-**Backend**: Python (FastAPI) — handles geometry processing, toolpath generation, NC compilation.
+**Backend**: Rust (axum) — handles geometry processing, toolpath generation, NC IR compilation, API serving.
+**Post-processors**: Python (via PyO3) — pluggable NC code formatters for different CNC controllers.
 **Frontend**: TypeScript + Three.js — browser-based 3D viewport and UI panels.
 Communication via REST API + WebSocket (for toolpath generation progress).
 
@@ -19,23 +20,22 @@ Communication via REST API + WebSocket (for toolpath generation progress).
 
 ```
 File/CAD Import → PartGeometry → Operation (geometry + tool + params)
-    → Toolpath → NCBlock IR → PostProcessor → NC code string
+    → Toolpath (Rust) → NCBlock IR (Rust) → PostProcessor (Python via PyO3) → NC code string
 ```
 
 ### Module Dependency Rules (no circular deps)
 
 ```
-api/            → core/, toolpath/, nc/, postprocessors/, io/, integrations/
-core/           → (no internal deps — only trimesh, shapely, numpy)
+api/            → core/, toolpath/, nc/, io/, integrations/
+core/           → (no internal deps — only geo, nalgebra, serde)
 toolpath/       → core/
-nc/             → core/
-postprocessors/ → nc/
+nc/             → core/ (bridge.rs uses PyO3)
 io/             → core/
 integrations/   → io/, core/
 utils/          → (no internal deps)
 ```
 
-Key principle: `core/`, `toolpath/`, `nc/`, `io/` have **zero web framework dependencies**. They are pure computational Python, independently testable.
+Key principle: `core/`, `toolpath/`, `nc/`, `io/` have **zero web framework dependencies**. They are pure computational Rust, independently testable.
 
 ### Three-Layer NC Generation
 
@@ -43,7 +43,7 @@ Key principle: `core/`, `toolpath/`, `nc/`, `io/` have **zero web framework depe
 2. **NCBlock IR** — controller-neutral program (adds spindle, tools, coolant, compensation, cycles, optional skips)
 3. **Post-processor** — formats to machine-specific output (G-code, Heidenhain conversational, Sinumerik)
 
-Post-processors are pluggable via Python entry_points. Built-in: LinuxCNC, Grbl, Marlin, Generic Fanuc, Sinumerik, Heidenhain TNC.
+Post-processors are written in Python, pluggable via entry_points, and invoked from Rust via PyO3. Built-in: LinuxCNC, Grbl, Marlin, Generic Fanuc, Sinumerik, Heidenhain TNC.
 
 ### Cutter Compensation
 
@@ -55,39 +55,38 @@ Operations can be marked optional with a skip level (1-9). Post-processors imple
 
 ### Canned Cycles
 
-The IR supports `CYCLE_DEFINE`/`CYCLE_CALL` blocks. Toolpath generators always produce explicit moves as fallback. Post-processors that declare cycle support emit native cycles (G81/G83 for G-code, CYCL DEF for Heidenhain); others use the expanded moves.
+The IR supports `CycleDefine`/`CycleCall` blocks. Toolpath generators always produce explicit moves as fallback. Post-processors that declare cycle support emit native cycles (G81/G83 for G-code, CYCL DEF for Heidenhain); others use the expanded moves.
 
 ## Build & Development Commands
 
 ```bash
-# Install dependencies (uv manages the virtualenv automatically)
-uv sync                                  # Install all deps including dev
-uv sync --extra step                     # Also install STEP/OpenCascade support
+# Build the Rust backend
+cargo build                          # Debug build
+cargo build --release                # Release build
+cargo build --features step          # With STEP/OpenCascade support
 
 # Run the server
-uv run python -m camproject                     # Production: serves frontend from frontend/dist/
-uv run python -m camproject --dev --port 8000   # Development: API only, CORS enabled
+cargo run                            # Production: serves frontend from frontend/dist/
+cargo run -- --dev --port 8000       # Development: API only, CORS enabled
+
+# Rust tests
+cargo test                           # All tests
+cargo test test_pocket               # Tests matching keyword
+cargo test -- --nocapture            # Show output
+cargo clippy                         # Lint
+cargo fmt                            # Format
+
+# Post-processors (Python)
+cd postprocessors
+uv sync                              # Install deps
+uv run pytest                        # Run tests
+uv run ruff check src/               # Lint
+uv run ruff format src/              # Format
 
 # Frontend
 cd frontend && npm install
-cd frontend && npm run dev               # Vite dev server on :5173, proxies /api to :8000
-cd frontend && npm run build             # Build to frontend/dist/
-
-# Tests
-uv run pytest                                   # All tests
-uv run pytest tests/test_pocket.py              # Single file
-uv run pytest tests/test_pocket.py::test_name   # Single test
-uv run pytest -x                                # Stop on first failure
-uv run pytest -k "profile"                      # Match keyword
-
-# Lint & type check
-uv run ruff check src/
-uv run ruff format src/
-uv run mypy src/camproject/
-
-# Add a dependency
-uv add <package>                         # Runtime dependency
-uv add --dev <package>                   # Dev dependency
+cd frontend && npm run dev           # Vite dev server on :5173, proxies /api to :8000
+cd frontend && npm run build         # Build to frontend/dist/
 ```
 
 ## Design Documents
@@ -99,10 +98,10 @@ Detailed design docs live in `docs/`:
 | `00-overview.md` | Architecture, tech choices, design principles |
 | `01-data-model.md` | Core types: Project, PartGeometry, Tool, Operation, Toolpath |
 | `02-api-design.md` | REST API + WebSocket spec with request/response examples |
-| `03-nc-and-postprocessors.md` | NCBlock IR, PostProcessor ABC, canned cycles, optional operations, Heidenhain/Sinumerik details |
+| `03-nc-and-postprocessors.md` | NCBlock IR (Rust), PostProcessor ABC (Python), PyO3 bridge, canned cycles, optional operations |
 | `04-toolpath-algorithms.md` | Slicing, offset, facing, profile, pocket, drill algorithms |
 | `05-frontend-design.md` | Three.js viewport, UI layout, panels, Vite build |
-| `06-project-structure.md` | Directory tree, pyproject.toml, dependency rules |
+| `06-project-structure.md` | Directory tree, Cargo.toml, pyproject.toml (post-processors), dependency rules |
 | `07-implementation-phases.md` | Phased task breakdown with deliverables |
 | `08-integrations.md` | CAD integrations: Onshape API, FreeCAD, watch folder |
 | `09-part-update.md` | Geometry change handling: diff, alignment, operation audit |
@@ -111,6 +110,7 @@ When implementing a feature, read the relevant design doc first. The docs are th
 
 ## Key Design Decisions
 
+- **Rust backend + Python post-processors**: Rust for performance-critical computation (geometry, toolpaths, NC IR). Python for post-processors because they're the most likely extension point, and Python's string manipulation + entry_points system makes custom post-processors easy to write.
 - **Trust the operator**: Only error on physically impossible geometry (tool wider than pocket, etc.). Never warn about aggressive feeds or deep cuts — that's the operator's call.
 - **Auto-persistence**: Every change is saved immediately. No save button. Undo/redo via persistent command history (JSON patches). User can clear history if project file grows large.
 - **WCS and stock are per-operation**, not per-project — enables multi-setup parts (flip part, different WCS for back side). Operations sharing a setup use the same WCS values.
