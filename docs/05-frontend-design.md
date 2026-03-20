@@ -165,10 +165,10 @@ Controls:
 
 ```bash
 # Terminal 1: Backend
-python -m camproject --dev    # FastAPI with auto-reload
+uv run python -m camproject --dev    # FastAPI with auto-reload
 
 # Terminal 2: Frontend
-cd frontend && npm run dev    # Vite dev server with proxy to backend
+cd frontend && npm run dev           # Vite dev server with proxy to backend
 ```
 
 Vite proxies `/api/*` to the FastAPI backend during development.

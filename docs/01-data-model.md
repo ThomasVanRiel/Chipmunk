@@ -151,6 +151,10 @@ class Operation:
     type: OperationType
     enabled: bool
 
+    # Optional at the machine (see 03-nc-and-postprocessors.md "Optional Operations")
+    optional: bool                # If True, operator can skip this at the machine
+    skip_level: int               # 1-9, maps to block delete level or jump variable
+
     # References
     geometry_id: str              # Which PartGeometry to machine
     tool_id: str                  # Which Tool to use

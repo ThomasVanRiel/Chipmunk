@@ -76,6 +76,7 @@ The `Project` object is the root of all state. The server could theoretically se
 | DXF import | ezdxf | MIT | Full DXF version support, actively maintained |
 | SVG import | svgpathtools | MIT | SVG path parsing to Bezier segments |
 | STEP import | OCP/build123d | LGPL | OpenCascade wrapper, deferred (heavy ~300MB dep) |
+| Package manager | uv | MIT | Fast Python package/project manager, handles venv + deps + lockfile |
 | Python linting | ruff | MIT | Fast, replaces flake8+isort+black |
 | Testing | pytest | MIT | Standard Python testing |
 

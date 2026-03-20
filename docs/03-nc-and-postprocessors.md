@@ -43,6 +43,10 @@ class BlockType(Enum):
     CYCLE_CALL = "cycle_call"       # Execute the defined cycle at a position
     CYCLE_OFF = "cycle_off"         # Cancel active cycle
 
+    # Optional operation skip (see "Optional Operations" section below)
+    OPTIONAL_SKIP_START = "optional_skip_start"  # Start of skippable section
+    OPTIONAL_SKIP_END = "optional_skip_end"      # End of skippable section
+
 @dataclass
 class NCBlock:
     type: BlockType
@@ -57,6 +61,8 @@ class NCBlock:
     # SET_UNITS: units ("mm"/"inch")
     # SET_WORK_OFFSET: offset ("G54"/"G55"/...)
     # COMP_LEFT/RIGHT: D (offset register number)
+    # OPTIONAL_SKIP_START: skip_level (1-9), label (str), operation_name (str)
+    # OPTIONAL_SKIP_END: skip_level (1-9), label (str)
     # COMP_OFF: (no params)
     # CYCLE_DEFINE: cycle_type, + cycle-specific params (see Canned Cycles section)
     # CYCLE_CALL: X, Y (position to execute cycle at)
@@ -208,6 +214,16 @@ class ProgramContext:
 - `M3`/`M5` for spindle (or laser)
 - `G28` for homing
 - Simpler preamble/postamble
+
+#### Sinumerik (`.mpf`)
+- Line numbers: `N10`, `N20`, ...
+- `G0`/`G1`/`G2`/`G3` standard motion (same as Fanuc base)
+- Cutter compensation: `G41`/`G42`/`G40` (standard)
+- Block delete: `/1` through `/8`
+- Conditional jumps: `IF condition GOTOF label` / `IF condition GOTOB label`
+- Variables: `R1`-`R999` for parameters
+- `M30` program end
+- Subprogram support: `PROC` / `RET` (future)
 
 #### Heidenhain TNC (`.h`)
 
@@ -444,6 +460,181 @@ This gives the user explicit control — they can choose whether the CAM or the 
 Canned cycle support is planned for later phases:
 - **Drilling cycles** (G81/G83, CYCL DEF 200/203): Implemented alongside drill operations in Phase 4
 - **Heidenhain milling cycles** (CYCL DEF 251/252/273): Phase 5+, since they require contour definition output and are tightly coupled to the Heidenhain post-processor
+
+## Optional Operations
+
+Operations can be marked `optional=True` so the machine operator can skip them at runtime without editing the NC program. This is common for finishing passes, deburring, engraving, or chamfering that may not be needed on every part.
+
+### Skip Levels
+
+Each optional operation has a `skip_level` (1-9). Operations with the same skip level are skipped together. This lets the operator control groups independently:
+
+| skip_level | Typical use |
+|---|---|
+| 1 | Finishing passes |
+| 2 | Chamfer / deburring |
+| 3 | Engraving / marking |
+| 4-9 | User-defined |
+
+### How Post-Processors Implement It
+
+The NC compiler wraps optional operations in `OPTIONAL_SKIP_START` / `OPTIONAL_SKIP_END` blocks. Each post-processor translates these to its native skip mechanism.
+
+#### Strategy 1: Block Delete (`/`)
+
+The simplest and most portable approach. Every line within the optional section is prefixed with `/` (or `/2`, `/3`, etc. for multi-level). The operator toggles the "block delete" switch on the controller panel.
+
+**Supported by**: Virtually all controllers (Fanuc, LinuxCNC, Haas, Grbl, Sinumerik, Heidenhain)
+
+**Limitation**: On basic controllers, there's only one block delete switch — all `/` lines are either skipped or not. Controllers with multi-level block delete (`/1` through `/9`) can skip levels independently, which maps perfectly to our `skip_level`.
+
+**Fanuc / LinuxCNC / Haas**:
+```gcode
+(Optional: Finish profile - Block delete level 1)
+/ N0200 T2 M6 (3mm finish end mill)
+/ N0210 S24000 M3
+/ N0220 G0 X0 Y0
+/ N0230 G0 Z5.000
+/ N0240 G41 D02
+/ N0250 G1 X10.000 Y0 Z-10.000 F600.000
+...
+/ N0300 G40
+/ N0310 M5
+```
+
+With multi-level block delete (Haas, some Fanuc):
+```gcode
+/2 N0200 T2 M6 (chamfer mill)
+/2 N0210 S12000 M3
+...
+```
+
+**Grbl**:
+```gcode
+; Optional: Finish profile (toggle block delete to skip)
+/ G0 X0 Y0
+/ G0 Z5
+/ G1 X10 Y0 Z-10 F600
+...
+```
+Grbl supports single-level `/` only.
+
+**Sinumerik**:
+```gcode
+; Optional: Finish profile
+/1 N200 T2 M6
+/1 N210 S24000 M3
+...
+```
+Sinumerik supports `/1` through `/8`.
+
+**Heidenhain**:
+Heidenhain also supports `/` block delete:
+```
+/ 50 TOOL CALL 2 Z S24000
+/ 51 L X+0 Y+0 FMAX M3
+/ 52 L X+10 Y+0 Z-10 F600 RL
+...
+```
+
+#### Strategy 2: Labels + Conditional Jumps
+
+More flexible than block delete — the operator sets a variable (parameter/Q-parameter/R-parameter) to control which operations run. This allows runtime decisions without a hardware switch, and works well on controllers with limited block delete levels.
+
+The post-processor declares which strategy it prefers via a property:
+
+```python
+class PostProcessor(ABC):
+    # ...existing methods...
+
+    @property
+    def optional_skip_strategy(self) -> str:
+        """
+        How to implement optional operation skipping.
+        "block_delete": Use / prefix (default, most portable)
+        "jump": Use labels and conditional jumps (more flexible)
+        "both": Emit both / prefix and jump structure (belt and suspenders)
+        """
+        return "block_delete"
+```
+
+**Heidenhain** (jump strategy):
+```
+; Check Q parameter — Q1=0 means skip finishing
+FN 9: IF +Q1 EQU +0 GOTO LBL 10
+50 TOOL CALL 2 Z S24000
+51 L X+0 Y+0 FMAX M3
+52 L X+10 Y+0 Z-10 F600 RL
+...
+59 L Z+25 FMAX
+LBL 10
+```
+The operator sets `Q1=1` to run the finishing pass, `Q1=0` to skip it. This can be done from the controller panel or via a program header section.
+
+**Sinumerik** (jump strategy):
+```gcode
+; R1=0 to skip finishing
+IF R1==0 GOTOF SKIP_FINISH
+N200 T2 M6
+N210 S24000 M3
+...
+N300 M5
+SKIP_FINISH:
+```
+
+**LinuxCNC** (jump strategy using O-codes):
+```gcode
+; #<_skip_finish> = 0 to skip
+O100 IF [#<_skip_finish> EQ 0]
+  O100 GOTO 999
+O100 ENDIF
+N200 T2 M6
+...
+O999 (skip target)
+```
+
+**Fanuc Macro B** (jump strategy):
+```gcode
+(Skip finishing if #500 = 0)
+IF [#500 EQ 0] GOTO 100
+N200 T2 M6
+N210 S24000 M3
+...
+N100 (skip target)
+```
+
+#### Strategy Comparison
+
+| Aspect | Block delete (`/`) | Conditional jump |
+|---|---|---|
+| Portability | Universal | Controller-specific syntax |
+| Multi-level | Limited (1-9 depending on controller) | Unlimited (one variable per operation) |
+| Runtime control | Hardware switch on panel | Set variable value |
+| Program readability | Lines visually marked with `/` | Clear IF/GOTO structure |
+| Nesting | Not possible | Possible (nested IFs) |
+| Grbl support | Yes (single level) | No |
+
+**Default**: Block delete is the default strategy for all post-processors. Jump strategy is an option on controllers that support it (Heidenhain, Sinumerik, LinuxCNC, Fanuc Macro B). The user can choose per-export in the export dialog.
+
+### Compiler Behavior
+
+When the compiler encounters an operation with `optional=True`:
+
+1. Emit `OPTIONAL_SKIP_START` block with `skip_level` and a label name derived from the operation name
+2. Emit all the operation's NCBlocks (tool change, spindle, toolpath, etc.)
+3. Emit `OPTIONAL_SKIP_END` block
+
+The post-processor's `format_blocks()` method handles these:
+- For block delete: sets an internal flag, prefixes subsequent lines with `/N` until `OPTIONAL_SKIP_END`
+- For jumps: emits the conditional jump + label pair
+
+### Safety Considerations
+
+Skipping an operation at the machine must leave the machine in a safe state:
+
+- The compiler inserts a **safe Z retract** before `OPTIONAL_SKIP_START` so the tool is clear regardless of whether the section runs
+- After `OPTIONAL_SKIP_END`, the compiler re-establishes state: cancels any compensation (`G40`), cancels any active cycle (`G80`/`CYCL OFF`), rapids to safe Z
+- If the skipped operation included a tool change, the next operation must handle the fact that the tool may or may not have been changed — the compiler inserts a redundant `TOOL_CHANGE` after the optional section if needed
 
 ## Example Output
 

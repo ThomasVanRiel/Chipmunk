@@ -55,6 +55,7 @@ CAMproject/
 │       │   ├── grbl.py             # Grbl post-processor
 │       │   ├── marlin.py           # Marlin post-processor
 │       │   ├── generic_fanuc.py    # Generic Fanuc post-processor
+│       │   ├── sinumerik.py         # Siemens Sinumerik
 │       │   └── heidenhain.py       # Heidenhain TNC conversational
 │       ├── io/
 │       │   ├── __init__.py
@@ -128,6 +129,15 @@ CAMproject/
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.3",
+    "mypy>=1.8",
+]
+
 [project]
 name = "camproject"
 version = "0.1.0"
@@ -168,6 +178,7 @@ linuxcnc = "camproject.postprocessors.linuxcnc:LinuxCNCPost"
 grbl = "camproject.postprocessors.grbl:GrblPost"
 marlin = "camproject.postprocessors.marlin:MarlinPost"
 fanuc = "camproject.postprocessors.generic_fanuc:GenericFanucPost"
+sinumerik = "camproject.postprocessors.sinumerik:SinumerikPost"
 heidenhain = "camproject.postprocessors.heidenhain:HeidenhainPost"
 
 [tool.ruff]
@@ -189,13 +200,16 @@ strict = true
 
 ## Development Commands
 
+uv is the project's Python package manager. It handles virtualenv creation, dependency resolution, and lockfile management automatically.
+
 ```bash
-# Install in development mode
-pip install -e ".[dev]"
+# Install dependencies (creates .venv automatically)
+uv sync                                  # All deps including dev
+uv sync --extra step                     # Also install STEP/OpenCascade support
 
 # Run the server (backend)
-python -m camproject                    # Production: serves frontend from frontend/dist/
-python -m camproject --dev --port 8000  # Development: API only, CORS enabled
+uv run python -m camproject                    # Production: serves frontend from frontend/dist/
+uv run python -m camproject --dev --port 8000  # Development: API only, CORS enabled
 
 # Frontend development
 cd frontend
@@ -207,18 +221,23 @@ cd frontend
 npm run build                           # Outputs to frontend/dist/
 
 # Run tests
-pytest                                  # All tests
-pytest tests/test_pocket.py             # Single test file
-pytest tests/test_pocket.py::test_square_pocket  # Single test
-pytest -x                               # Stop on first failure
-pytest -k "profile"                     # Tests matching keyword
+uv run pytest                                  # All tests
+uv run pytest tests/test_pocket.py             # Single test file
+uv run pytest tests/test_pocket.py::test_square_pocket  # Single test
+uv run pytest -x                               # Stop on first failure
+uv run pytest -k "profile"                     # Tests matching keyword
 
 # Lint
-ruff check src/
-ruff format src/
+uv run ruff check src/
+uv run ruff format src/
 
 # Type check
-mypy src/camproject/
+uv run mypy src/camproject/
+
+# Dependency management
+uv add <package>                         # Add runtime dependency
+uv add --dev <package>                   # Add dev dependency
+uv lock                                  # Update lockfile
 ```
 
 ## Module Dependency Rules
