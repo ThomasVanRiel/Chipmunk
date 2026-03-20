@@ -74,6 +74,12 @@ class PartGeometry:
     # Transform applied to the imported geometry
     transform: np.ndarray             # 4x4 homogeneous transform matrix
 
+    # Provenance — where the geometry came from (see 08-integrations.md)
+    provenance: PartProvenance | None  # None for legacy/unknown imports
+
+    # Update history — tracks geometry changes over time (see 09-part-update.md)
+    update_history: list[PartUpdate]  # Append-only log of updates
+
     def get_contour_at_z(self, z: float) -> shapely.MultiPolygon:
         """Slice the 3D mesh at height z, or return 2D contours."""
         ...
@@ -134,6 +140,10 @@ class ProfileSide(Enum):
     INSIDE = "inside"
     ON = "on"                   # Cut on the line (no offset)
 
+class CompensationMode(Enum):
+    CAM = "cam"                 # CAM computes offset toolpath (tool center follows pre-offset path)
+    CONTROLLER = "controller"   # CAM outputs geometry path, controller applies G41/G42
+
 @dataclass
 class Operation:
     id: str
@@ -160,6 +170,7 @@ class Operation:
     # Profile
     profile_side: ProfileSide | None
     cut_direction: CutDirection | None
+    compensation: CompensationMode | None  # CAM offset vs controller G41/G42
     tabs_enabled: bool
     tab_width: float | None
     tab_height: float | None
@@ -169,11 +180,39 @@ class Operation:
     pocket_stepover: float | None
     pocket_strategy: str | None   # "contour_parallel" or "zigzag"
 
+    # Canned cycles (future — see 03-nc-and-postprocessors.md)
+    use_canned_cycle: bool        # Default: False. Emit cycle blocks if post-processor supports it.
+
     # Computed output
     toolpath: Toolpath | None     # Generated, not serialized
 ```
 
 **Alternative considered**: Using separate dataclasses per operation type (FacingOperation, ProfileOperation, etc.). Decided against it because a single type is simpler for serialization, API contracts, and the operations panel UI. Type-specific fields are simply None when not applicable.
+
+### Cutter Compensation: CAM vs Controller
+
+Operations that involve tool radius offset (profile, pocket walls) support two compensation modes:
+
+- **`CAM` mode** (default): The CAM software computes the offset toolpath. The NC code contains the tool center coordinates — the controller simply follows them. This is the safest and most portable approach. Suitable for roughing where exact tool diameter matters less, and for controllers without cutter compensation support (e.g., Grbl).
+
+- **`Controller` mode**: The CAM software outputs the **geometry path** (the actual part contour). The NC code includes `G41` (left offset) or `G42` (right offset) commands, and the controller applies the tool radius from its tool table at runtime. This allows the operator to fine-tune the tool diameter on the machine (e.g., to account for tool wear) without regenerating toolpaths. Ideal for finishing passes where dimensional accuracy matters.
+
+**Implications for toolpath generation**:
+- In `CAM` mode: `toolpath/profile.py` offsets the contour by `tool_diameter / 2` and emits tool-center coordinates.
+- In `Controller` mode: `toolpath/profile.py` emits the original contour coordinates. The NC compiler adds `G41`/`G42` with a `D` word referencing the tool offset register. A lead-in move is **required** (controller needs a linear move to ramp into compensation).
+
+**Implications for NC compilation**:
+- `nc/compiler.py` checks the operation's compensation mode. For `Controller` mode, it emits:
+  - `G41 D01` (or `G42 D01`) before the contour
+  - The contour path at geometry coordinates (not offset)
+  - `G40` to cancel compensation after the contour
+- Post-processors translate these IR blocks to their native syntax:
+  - G-code controllers: `G41 D01` / `G42 D01` / `G40`
+  - Heidenhain: `RL` / `RR` / `R0` appended to the move line (compensation is part of the move command, not a separate block — the Heidenhain post-processor merges the COMP block with the next LINEAR/ARC block)
+
+**Typical usage pattern**:
+- Roughing pass: `CompensationMode.CAM` with a stock-to-leave allowance
+- Finishing pass: `CompensationMode.CONTROLLER` so the operator can dial in the exact dimension
 
 ### Toolpath
 

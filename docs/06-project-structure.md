@@ -54,7 +54,8 @@ CAMproject/
 │       │   ├── linuxcnc.py         # LinuxCNC post-processor
 │       │   ├── grbl.py             # Grbl post-processor
 │       │   ├── marlin.py           # Marlin post-processor
-│       │   └── generic_fanuc.py    # Generic Fanuc post-processor
+│       │   ├── generic_fanuc.py    # Generic Fanuc post-processor
+│       │   └── heidenhain.py       # Heidenhain TNC conversational
 │       ├── io/
 │       │   ├── __init__.py
 │       │   ├── stl_reader.py       # STL → PartGeometry (via trimesh)
@@ -62,6 +63,12 @@ CAMproject/
 │       │   ├── svg_reader.py       # SVG → PartGeometry (via svgpathtools)
 │       │   ├── step_reader.py      # STEP → PartGeometry (stub → Phase 5)
 │       │   └── project_file.py     # .camproj save/load
+│       ├── integrations/
+│       │   ├── __init__.py
+│       │   ├── base.py              # CADIntegration ABC
+│       │   ├── onshape.py           # Onshape REST API (Phase 4-5)
+│       │   ├── freecad.py           # FreeCAD file/CLI (Phase 5+)
+│       │   └── watch_folder.py      # Generic file watcher (Phase 3-4)
 │       └── utils/
 │           ├── __init__.py
 │           └── math_utils.py       # Arc fitting, geometric helpers
@@ -161,6 +168,7 @@ linuxcnc = "camproject.postprocessors.linuxcnc:LinuxCNCPost"
 grbl = "camproject.postprocessors.grbl:GrblPost"
 marlin = "camproject.postprocessors.marlin:MarlinPost"
 fanuc = "camproject.postprocessors.generic_fanuc:GenericFanucPost"
+heidenhain = "camproject.postprocessors.heidenhain:HeidenhainPost"
 
 [tool.ruff]
 target-version = "py311"

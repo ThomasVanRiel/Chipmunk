@@ -135,10 +135,20 @@ Cuts along the outline of a shape — like tracing the contour with the tool.
 
 **Algorithm**:
 1. Get 2D contour at target Z depth
-2. Offset by tool radius:
-   - Outside profile: offset outward by `tool_diameter / 2`
-   - Inside profile: offset inward by `tool_diameter / 2`
-   - On-line profile: no offset (center of tool follows the contour)
+2. Apply tool compensation based on `CompensationMode`:
+
+   **CAM mode** (default):
+   - Outside profile: offset contour outward by `tool_diameter / 2`
+   - Inside profile: offset contour inward by `tool_diameter / 2`
+   - On-line profile: no offset
+   - Emitted coordinates are the tool center path
+
+   **Controller mode**:
+   - No geometric offset is applied — emit the original contour coordinates
+   - NC compiler adds `G41` (climb/left) or `G42` (conventional/right) with `D` register
+   - NC compiler adds `G40` after the contour to cancel compensation
+   - Lead-in move is **mandatory** (controller needs a linear approach move to ramp into compensation — the offset is not applied during the `G41`/`G42` block itself, but takes effect on the next move)
+
 3. Determine cut direction:
    - **Climb milling** (recommended for CNC): tool moves CCW around outside profiles, CW around inside profiles
    - **Conventional milling**: opposite
@@ -146,7 +156,7 @@ Cuts along the outline of a shape — like tracing the contour with the tool.
    a. Rapid to safe Z
    b. Rapid to lead-in start point
    c. Lead-in move (arc or straight ramp into material)
-   d. Follow the offset contour
+   d. Follow the contour (offset or geometry path depending on compensation mode)
    e. Lead-out move
    f. Rapid to safe Z
 5. If tabs are enabled, insert tab segments (raise Z to tab height at specified intervals)
@@ -275,6 +285,17 @@ After roughing with a large tool, a smaller tool cleans up the remaining materia
 
 This is a Phase 2+ optimization — the initial implementation uses a single tool per pocket.
 
+### Cutter Compensation for Pockets
+
+Pocketing interacts with cutter compensation differently than profiling:
+
+- **Interior clearing passes**: Always use `CAM` mode — controller compensation doesn't make sense for parallel offset loops in the pocket interior.
+- **Final wall pass**: The outermost contour-parallel pass (closest to the pocket wall) can optionally use `Controller` mode. This is implemented as a separate finishing pass:
+  1. Rough the pocket with `CAM` mode, leaving stock-to-leave on walls
+  2. Run a single-pass profile along the pocket boundary with `Controller` mode (`G41`/`G42`)
+
+This allows the operator to fine-tune pocket dimensions on the machine. The `compensation` field on the operation controls whether this wall finishing pass uses `CAM` or `Controller` mode.
+
 ## Drill Operation (Phase 4)
 
 ### `toolpath/drill.py`
@@ -287,8 +308,16 @@ Generates drilling cycles for point features (holes).
    - **Simple drill**: Rapid down to R-plane, feed to depth, rapid retract
    - **Peck drill**: Feed to partial depth, retract to clear chips, repeat
    - **Spot drill**: Shallow drill for center marking
+   - **Bore**: Feed to depth, optional dwell at bottom, feed retract
+   - **Tap**: Feed to depth at pitch-synchronized feed, reverse retract
 
-**Cycle representation**: Drill cycles are represented as NCBlocks. Post-processors that support canned cycles (G81/G83) output them; post-processors that don't (e.g., Grbl) expand them to equivalent G0/G1 moves.
+**Dual output**: The toolpath generator always produces explicit moves (rapid/linear segments). When `use_canned_cycle=True`, the NC compiler additionally emits `CYCLE_DEFINE` + `CYCLE_CALL` blocks. The post-processor chooses which form to output based on its `supported_cycles` set:
+
+- **G-code controllers** (Fanuc, LinuxCNC, Haas): `G81`/`G83`/`G84`/`G85` with position-only lines, `G80` to cancel
+- **Heidenhain**: `CYCL DEF 200`/`203`/`207` with `M99` cycle call on position lines
+- **Grbl/Marlin**: Expanded explicit moves (no canned cycle support)
+
+See `03-nc-and-postprocessors.md` for full cycle type mapping.
 
 ## Segment Ordering
 
