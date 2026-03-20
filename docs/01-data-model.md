@@ -8,14 +8,18 @@ The data model is centered around a `Project` which contains everything needed t
 
 ```
 Project
-├── parts: Vec<PartGeometry>
-├── tools: Vec<Tool>              (references global ToolLibrary, editable per-project)
-├── operations: Vec<Operation>
-│     ├── wcs: WorkCoordinateSystem      (per-operation, supports multi-setup)
-│     ├── stock: Option<StockDefinition> (optional, per-operation)
-│     └── toolpath: Option<Toolpath>     (generated, not saved)
-│           └── segments: Vec<ToolpathSegment>
-└── history: CommandHistory        (undo/redo)
+├── project_type: ProjectType            (3D or 2.5D — set at creation, immutable)
+├── parts: Vec<PartGeometry>             (B-rep shapes for 3D, wires/faces for 2.5D)
+├── tools: Vec<Tool>                     (references global ToolLibrary, editable per-project)
+├── setups: Vec<Setup>                   (groups of operations sharing WCS/stock/clearance)
+│     ├── wcs: WorkCoordinateSystem
+│     ├── stock: Option<StockDefinition>
+│     ├── clearance_height: f64
+│     └── operations: Vec<Operation>
+│           ├── setup_id: Uuid           (parent setup, inherits WCS/stock/clearance)
+│           └── toolpath: Option<Toolpath>
+│                 └── segments: Vec<ToolpathSegment>
+└── history: CommandHistory              (undo/redo)
 ```
 
 ## Core Types
@@ -25,17 +29,30 @@ Project
 The root container. Serializable to/from JSON for project save/load.
 
 ```rust
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ProjectType {
+    ThreeD,     // 3D projects: STEP/STL input, B-rep geometry, 3D viewport
+    TwoHalfD,  // 2.5D projects: DXF/SVG input, 2D wire/profile geometry, top-down view
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub name: String,
+    pub project_type: ProjectType,         // Set at creation, immutable
     pub units: Units,
     pub parts: Vec<PartGeometry>,
     pub tools: Vec<Tool>,
-    pub operations: Vec<Operation>,
+    pub setups: Vec<Setup>,
     pub history: CommandHistory,
     pub post_processor_id: Option<String>,  // Default post-processor for this project
 }
 ```
+
+**Project type** determines:
+- **3D**: Accepts STEP and STL imports. Parts are B-rep solids. Frontend shows a 3D viewport with face selection.
+- **2.5D**: Accepts DXF and SVG imports. Parts are 2D wires and faces. Frontend shows a top-down 2D view. Depth comes from operation parameters, not geometry.
+
+A project is one type or the other — set at creation time, not changeable afterward. A physical part that needs both 3D milling and 2D engraving uses two separate projects.
 
 ### WorkCoordinateSystem
 
@@ -56,6 +73,27 @@ pub struct WorkCoordinateSystem {
 - Clicking a point/edge/face on the part to place the origin
 - Typing XYZ coordinates and ABC rotation manually
 - Selecting a preset (top center, corner, etc.)
+
+### Setup
+
+Groups operations that share the same workholding. Defines the WCS, stock, and clearance height — child operations inherit these but can override any value.
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Setup {
+    pub id: Uuid,
+    pub name: String,                          // e.g. "Setup 1 — Top"
+    pub wcs: WorkCoordinateSystem,
+    pub stock: Option<StockDefinition>,
+    pub clearance_height: f64,                 // Safe Z for rapids within this setup
+}
+```
+
+**Clearance height** is the only safety height the user configures. It defines the Z for rapid moves between operations within the setup. The post-processor inserts full retractions to clearance height between setups when generating multi-setup programs. Retract between passes within an operation is handled by the toolpath generator (typically stock top + a small margin).
+
+**WCS inheritance**: Operations within a setup inherit its WCS, stock, and clearance height. An operation can override any inherited value by setting it explicitly. If the setup's WCS changes, all operations that haven't overridden it update automatically.
+
+NC export is typically per-setup (one program per fixture).
 
 ### StockDefinition (Optional)
 
@@ -85,7 +123,9 @@ pub enum StockShape {
 
 ### PartGeometry
 
-Wraps either a 3D mesh or a 2D contour set. Provides a uniform interface for toolpath generation.
+Wraps an OpenCascade B-rep shape. For 3D projects this is a solid or shell from STEP/STL. For 2.5D projects this is a collection of wires and faces from DXF/SVG.
+
+The B-rep is the primary representation — all operations (slicing, face selection, bounding box) work on it directly. Triangle meshes are generated on demand for the frontend viewport.
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,13 +134,16 @@ pub struct PartGeometry {
     pub name: String,                      // Display name (usually filename)
     pub source_format: String,             // "stl", "dxf", "svg", "step"
 
-    // 3D representation (from STL/STEP)
+    // Primary representation — OpenCascade B-rep shape
+    // Not serialized to JSON — persisted as a separate .brep file
     #[serde(skip)]
-    pub mesh: Option<TriMesh>,             // Triangle mesh (vertices + indices)
+    pub shape: TopoDS_Shape,
 
-    // 2D representation (from DXF/SVG, or sliced from mesh)
-    #[serde(skip)]
-    pub contours_2d: Option<MultiPolygon>, // geo::MultiPolygon
+    // Cached face metadata (serializable, for API/frontend)
+    pub faces: Vec<FaceInfo>,
+
+    // File reference for the persisted B-rep
+    pub brep_file: String,                 // e.g. "bracket.brep" — alongside the .camproj
 
     // Transform applied to the imported geometry
     pub transform: [[f64; 4]; 4],          // 4x4 homogeneous transform matrix
@@ -111,34 +154,75 @@ pub struct PartGeometry {
     // Update history — tracks geometry changes over time (see 09-part-update.md)
     pub update_history: Vec<PartUpdate>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaceInfo {
+    pub id: u32,                           // Stable face index within the shape
+    pub surface_type: SurfaceType,
+    pub normal: Option<[f64; 3]>,          // Outward normal (planar faces only)
+    pub area: f64,
+    pub bounding_box: BoundingBox,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum SurfaceType {
+    Plane,
+    Cylinder,
+    Cone,
+    Sphere,
+    Torus,
+    BSpline,
+    Other,
+}
 ```
 
 The `PartGeometry` type provides key methods:
 
 ```rust
 impl PartGeometry {
-    /// Slice the 3D mesh at height z, or return 2D contours.
-    pub fn get_contour_at_z(&self, z: f64) -> MultiPolygon { ... }
+    /// Section the B-rep shape at height Z.
+    /// Returns exact curves (lines, arcs, B-splines) — not polyline approximations.
+    /// Uses BRepAlgoAPI_Section (shape vs. plane intersection).
+    /// For 2.5D parts, returns the same 2D geometry regardless of Z.
+    pub fn section_at_z(&self, z: f64) -> Vec<TopoDS_Edge> { ... }
+
+    /// Get all faces of a specific surface type.
+    /// Useful for feature detection (e.g., Cylinder faces = holes).
+    pub fn faces_by_type(&self, surface_type: SurfaceType) -> Vec<&FaceInfo> { ... }
+
+    /// Access the underlying B-rep face by index.
+    pub fn face(&self, face_id: u32) -> TopoDS_Face { ... }
+
+    /// Tessellate the B-rep for display. Generates a triangle mesh on demand.
+    /// `deflection` controls mesh density (lower = finer, default 0.1mm).
+    /// Returns face_ids per triangle for face selection in the frontend.
+    pub fn tessellate(&self, deflection: f64) -> TessellatedMesh { ... }
 
     /// Axis-aligned bounding box in world coordinates.
     pub fn bounding_box(&self) -> BoundingBox { ... }
+
+    /// Get edges of a specific face as curves.
+    pub fn face_edges(&self, face_id: u32) -> Vec<TopoDS_Edge> { ... }
 }
 ```
 
-**Design note**: The `get_contour_at_z()` method is the key abstraction that lets toolpath generators work identically on both 3D meshes and 2D drawings. For 2D imports, this returns the same contours regardless of Z. For 3D meshes, it slices the triangle mesh at the given Z height and converts the cross-section to `geo::MultiPolygon`.
+**Design note**: `section_at_z()` replaces the old `get_contour_at_z()`. The key improvement is that it returns exact geometry — an arc in the model stays an arc in the cross-section, rather than being approximated as a polyline. For toolpath generators that use polygon offset (pockets), the exact edges are converted to `geo::MultiPolygon` at the toolpath stage. For profiles in controller compensation mode, exact arcs are preserved and emitted directly as `ArcCw`/`ArcCcw` segments.
 
-### TriMesh
+### TessellatedMesh
 
-Internal triangle mesh representation used for 3D geometry.
+Generated on demand from the B-rep shape for frontend display. Not stored — recomputed when needed.
 
 ```rust
 #[derive(Debug, Clone)]
-pub struct TriMesh {
+pub struct TessellatedMesh {
     pub vertices: Vec<[f64; 3]>,
-    pub normals: Vec<[f64; 3]>,    // Per-vertex normals
-    pub indices: Vec<[u32; 3]>,     // Triangle indices
+    pub normals: Vec<[f64; 3]>,     // Per-vertex normals
+    pub indices: Vec<[u32; 3]>,      // Triangle indices
+    pub face_ids: Vec<u32>,          // One per triangle — maps to FaceInfo.id
 }
 ```
+
+The `face_ids` array enables face selection in the frontend: raycasting identifies a triangle, the triangle's `face_id` identifies the B-rep face, and the backend can then read the face's exact geometry (normal, surface type, edges) for operations like orientation or WCS placement.
 
 ### Tool
 
@@ -167,6 +251,8 @@ pub enum CoolantMode {
 pub struct Tool {
     pub id: Uuid,
     pub name: String,                              // e.g. "6mm 2-flute end mill"
+    pub tool_number: u32,                          // Machine tool number (T1, T2, ...)
+    pub machine: Option<String>,                   // Machine label — for multi-machine projects
     pub tool_type: ToolType,
     pub diameter: f64,                             // Cutting diameter
     pub flute_length: f64,                         // Maximum depth of cut
@@ -182,6 +268,8 @@ pub struct Tool {
     pub recommended_coolant: Option<CoolantMode>,
 }
 ```
+
+**Tool number and name**: The post-processor decides which identifier to use in NC output. G-code controllers use `tool_number` (`T1 M6`). Heidenhain can use either (`TOOL CALL 1` or `TOOL CALL "6MM_EM"`). Tool numbers are not required to be unique within a project — a project may span multiple machines. Uniqueness is enforced within the same `machine` value only.
 
 **Workflow**: When the user selects a tool for an operation, the operation's cutting parameters are pre-filled from the tool's recommended values. The user can then adjust any value. Once overridden, changing the tool doesn't overwrite the user's edits — only empty/unset fields are populated.
 
@@ -242,12 +330,14 @@ pub struct Operation {
     pub skip_level: u8,            // 1-9, maps to block delete level or jump variable
 
     // References
+    pub setup_id: Uuid,            // Parent setup (inherits WCS, stock, clearance height)
     pub geometry_id: Uuid,         // Which PartGeometry to machine
     pub tool_id: Uuid,             // Which Tool to use
 
-    // Coordinate system & stock (per-operation, supports multi-setup parts)
-    pub wcs: WorkCoordinateSystem,
-    pub stock: Option<StockDefinition>,
+    // Overrides (None = inherit from setup)
+    pub wcs_override: Option<WorkCoordinateSystem>,
+    pub stock_override: Option<StockDefinition>,
+    pub clearance_height_override: Option<f64>,
 
     // Cutting parameters (pre-filled from tool recommendations, user can override)
     pub feed_rate: f64,            // mm/min or in/min — XY cutting feed
@@ -278,6 +368,7 @@ pub struct Operation {
     // Pocket
     pub pocket_stepover: Option<f64>,
     pub pocket_strategy: Option<String>,          // "contour_parallel" or "zigzag"
+    pub pocket_entry: Option<String>,             // "plunge" (default), "helix", or "ramp"
 
     // Canned cycles (future — see 03-nc-and-postprocessors.md)
     pub use_canned_cycle: bool,    // Default: false. Emit cycle blocks if post-processor supports it.
@@ -426,44 +517,68 @@ The project is **auto-persisted** on every change — there is no save button. T
 {
   "version": "1.0",
   "name": "My Project",
+  "project_type": "3d",
   "units": "mm",
   "parts": [
     {
-      "id": "...",
-      "name": "bracket.stl",
-      "source_format": "stl",
-      "source_file": "bracket.stl",
+      "id": "550e8400-...",
+      "name": "bracket.step",
+      "source_format": "step",
+      "brep_file": "bracket.brep",
+      "faces": [ { "id": 0, "surface_type": "plane", "normal": [0, 0, 1], "area": 500.0, ... }, ... ],
       "transform": [[1,0,0,0], [0,1,0,0], [0,0,1,0], [0,0,0,1]]
     }
   ],
   "tools": [ ... ],
+  "setups": [
+    {
+      "id": "...",
+      "name": "Setup 1 — Top",
+      "wcs": { "origin": [0,0,0], "rotation": [0,0,0], "work_offset": "G54" },
+      "stock": { "shape": "box", "width": 110, "height": 85, "depth": 25 },
+      "clearance_height": 50.0
+    }
+  ],
   "operations": [ ... ],
   "history": { "commands": [...], "cursor": 42 }
 }
 ```
 
-The actual geometry files (STL, DXF, etc.) are referenced by path, not embedded. The `.camproj` file stores enough information to re-import them. A future enhancement could bundle everything into a ZIP archive.
+**Geometry persistence**: B-rep shapes are saved as separate `.brep` files (OpenCascade native format) alongside the `.camproj` file. The `brep_file` field references the filename. On project load, OpenCascade reads the `.brep` file directly into a `TopoDS_Shape` — no re-import from the original source file needed.
+
+```
+my_project/
+├── my_project.camproj       # Project JSON (metadata, tools, operations, history)
+├── bracket.brep             # B-rep shape for part "bracket"
+└── housing.brep             # B-rep shape for part "housing"
+```
 
 Toolpaths are **not** saved — they are regenerated from operations. This keeps the save file small and avoids stale toolpath data.
 
 ## Mesh Data for Frontend
 
-When the frontend requests mesh data for Three.js rendering, the backend returns a compact JSON format:
+For 3D projects, the backend tessellates the B-rep shape on demand and returns a compact JSON format for Three.js rendering. The `face_ids` array maps each triangle back to the B-rep face it belongs to, enabling face selection.
 
 ```json
 {
   "vertices": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, ...],
   "normals": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, ...],
-  "indices": [0, 1, 2, ...]
+  "indices": [0, 1, 2, ...],
+  "face_ids": [0, 0, 0, 1, 1, 2, ...]
 }
 ```
 
-This maps directly to Three.js `BufferGeometry` attributes for efficient rendering.
+This maps directly to Three.js `BufferGeometry` attributes. The `face_ids` are stored as a custom buffer attribute and used during raycasting to identify which B-rep face was clicked.
+
+Tessellation quality is controlled by a `deflection` parameter (lower = finer mesh). Default: 0.1mm — suitable for typical hobby/small-shop parts.
+
+For 2.5D projects, there is no 3D mesh — the frontend renders 2D wires and faces in a top-down view.
 
 Toolpath data for visualization:
 
 ```json
 {
+  "start_position": {"x": 0, "y": 0, "z": 25},
   "segments": [
     {"type": "rapid", "x": 10, "y": 20, "z": 5},
     {"type": "linear", "x": 10, "y": 20, "z": -2, "feed": 500},

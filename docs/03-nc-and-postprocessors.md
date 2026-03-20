@@ -108,17 +108,22 @@ pub fn compile_program(
 **Compilation order**:
 1. Program header (comment with project name, date)
 2. Safety line: units, absolute mode, XY plane, feed-per-minute
-3. Work offset (G54 default)
-4. For each enabled operation (in order):
-   a. Tool change
-   b. Spindle on at specified RPM
-   c. Coolant on (if enabled)
-   d. Rapid to safe Z height
-   e. Toolpath segments (rapid/linear/arc)
-   f. Rapid to safe Z height
-   g. Spindle off (if last operation for this tool)
-5. Return to home position
-6. Program end (M30)
+3. For each setup (operations grouped by `setup_id`):
+   a. Work offset from setup WCS (G54/G55/...)
+   b. For each enabled operation in the setup:
+      - Tool change
+      - Spindle on at specified RPM
+      - Coolant on (if enabled)
+      - Rapid to clearance height (from setup or operation override)
+      - Toolpath segments (rapid/linear/arc)
+      - Rapid to clearance height
+      - Spindle off (if last operation for this tool)
+   c. Full retraction between setups (spindle off, coolant off, retract to safe Z)
+      — the post-processor handles the specific retraction sequence
+4. Return to home position
+5. Program end (M30)
+
+**Setup-aware compilation**: Operations inherit WCS, stock, and clearance height from their parent setup, with per-operation overrides. Between setups, the compiler inserts full retraction blocks to ensure a safe state before the next setup's work offset takes effect. The post-processor's `format_setup_transition()` method (if provided) can customize this retraction sequence for the target controller.
 
 **Optimization**: The compiler tracks modal state (current position, current feed rate, current tool) and omits redundant values. For example, if two consecutive linear moves have the same feed rate, the second `NCBlock` omits the `F` parameter — the post-processor then omits `F` from that line.
 

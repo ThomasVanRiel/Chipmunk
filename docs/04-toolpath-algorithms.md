@@ -4,37 +4,43 @@
 
 All 2.5D toolpath generation follows the same pattern:
 
-1. **Get 2D contour** at target Z depth (via mesh slicing or direct 2D import)
+1. **Get 2D contour** at target Z depth (via B-rep sectioning or direct 2D import)
 2. **Apply tool compensation** (offset polygon by tool radius)
 3. **Generate passes** at multiple Z depths (depth strategy)
 4. **Order segments** to minimize rapids
 5. **Emit toolpath segments** (rapid, linear, arc)
 
-## Mesh Slicing (3D → 2D)
+## B-Rep Sectioning (3D → 2D)
 
 ### `toolpath/slicer.rs`
 
-For STL/STEP inputs, we need to extract 2D cross-sections at specific Z heights.
+For STEP/STL inputs (3D projects), we extract 2D cross-sections at specific Z heights using OpenCascade's `BRepAlgoAPI_Section` — intersecting the B-rep shape with a horizontal plane.
 
 **Algorithm**:
-1. Cut the triangle mesh with a horizontal plane at the given Z height
-2. Collect all intersection line segments (each triangle intersecting the plane yields one segment)
-3. Chain segments into closed loops (connecting endpoints within tolerance)
-4. Convert loops to `geo::Polygon`/`geo::MultiPolygon`
-5. Cache slices by Z height (same Z is often queried multiple times)
+1. Construct a horizontal plane at the given Z height
+2. Use `BRepAlgoAPI_Section` to intersect the `TopoDS_Shape` with the plane → produces `TopoDS_Wire` (exact curves)
+3. Convert wires to `geo::Polygon`/`geo::MultiPolygon` for offset operations (arcs tessellated at this stage)
+4. Cache slices by Z height (same Z is often queried multiple times)
+
+**Key advantage over mesh slicing**: The section produces exact geometry — lines stay as lines, arcs stay as arcs, B-splines stay as B-splines. This enables arc-preserving profiles in controller compensation mode (see Profile section).
 
 **Edge cases**:
-- Mesh may have multiple disconnected bodies → `MultiPolygon`
+- Shape may have multiple disconnected bodies → `MultiPolygon`
 - Holes in the cross-section (e.g., a tube) → polygon with interior rings
 - Very thin features may produce degenerate slices → filter by minimum area
 
 ```rust
-pub fn slice_mesh(mesh: &TriMesh, z: f64, tolerance: f64) -> MultiPolygon {
-    /// Slice a mesh at height z, return 2D cross-section as geo geometry.
+pub fn section_at_z(shape: &TopoDS_Shape, z: f64) -> Vec<TopoDS_Wire> {
+    /// Section a B-rep shape at height z, return exact 2D wires.
+}
+
+pub fn section_to_polygons(shape: &TopoDS_Shape, z: f64, tolerance: f64) -> MultiPolygon {
+    /// Section at z and convert to geo polygons for offset operations.
+    /// Arcs are tessellated during conversion.
 }
 ```
 
-**Note**: Unlike Python's trimesh which provides `mesh.section()`, the Rust implementation uses custom mesh slicing. The algorithm iterates over triangles, finds plane-triangle intersections, and chains the resulting segments into polygons. Libraries like `parry3d` can assist with the plane-mesh intersection.
+For 2.5D projects (DXF/SVG), no sectioning is needed — the imported wires/faces are already 2D geometry. Depth comes from operation parameters.
 
 ## Polygon Offset
 
@@ -335,8 +341,6 @@ This is a variant of the Traveling Salesman Problem. Nearest-neighbor gives reas
 
 ## Safe Z Heights
 
-All operations use two Z safety heights:
-- **Rapid height** (clearance plane): Z height for rapid moves between features (typically 5-10mm above stock). Used for moves within the same operation.
-- **Safe height** (retract plane): Z height for moves between operations or to home (typically 25-50mm above stock).
+Operations use the **clearance height** defined on their parent setup (with optional per-operation override). This is the Z height for rapid moves between features within the same operation (typically 5-10mm above stock).
 
-These are project-level settings, overridable per operation.
+Between setups, the NC compiler inserts full retraction sequences (see `03-nc-and-postprocessors.md`) to ensure safe clearance before the next setup's work offset takes effect.

@@ -12,9 +12,12 @@ CAMproject is a browser-based CAM (Computer-Aided Manufacturing) tool for genera
 ## Architecture
 
 **Backend**: Rust (axum) — handles geometry processing, toolpath generation, NC IR compilation, API serving.
+**Geometry kernel**: OpenCascade (via opencascade-rs) — B-rep is the primary geometry representation. Triangle meshes generated on demand for display only.
 **Post-processors**: Python (via PyO3) — pluggable NC code formatters for different CNC controllers.
-**Frontend**: TypeScript + Three.js — browser-based 3D viewport and UI panels.
+**Frontend**: TypeScript + Three.js — browser-based 3D viewport (3D projects) or 2D top-down view (2.5D projects).
 Communication via REST API + WebSocket (for toolpath generation progress).
+
+**Project types**: 3D (STEP/STL input, B-rep solids, 3D viewport) or 2.5D (DXF/SVG input, 2D wires/faces, top-down view). Set at project creation, immutable.
 
 ### Data Flow
 
@@ -63,7 +66,6 @@ The IR supports `CycleDefine`/`CycleCall` blocks. Toolpath generators always pro
 # Build the Rust backend
 cargo build                          # Debug build
 cargo build --release                # Release build
-cargo build --features step          # With STEP/OpenCascade support
 
 # Run the server
 cargo run                            # Production: serves frontend from frontend/dist/
@@ -113,12 +115,26 @@ When implementing a feature, read the relevant design doc first. The docs are th
 - **Rust backend + Python post-processors**: Rust for performance-critical computation (geometry, toolpaths, NC IR). Python for post-processors because they're the most likely extension point, and Python's string manipulation + entry_points system makes custom post-processors easy to write.
 - **Trust the operator**: Only error on physically impossible geometry (tool wider than pocket, etc.). Never warn about aggressive feeds or deep cuts — that's the operator's call.
 - **Auto-persistence**: Every change is saved immediately. No save button. Undo/redo via persistent command history (JSON patches). User can clear history if project file grows large.
-- **WCS and stock are per-operation**, not per-project — enables multi-setup parts (flip part, different WCS for back side). Operations sharing a setup use the same WCS values.
+- **Setup grouping**: Operations are grouped under setups. Each setup defines WCS, stock, and clearance height. Child operations inherit these with optional per-operation overrides. Full retraction between setups is handled by the post-processor.
 - **Stock is optional** — the operator knows their stock. Stock definition is only needed later for optimization (avoid air cuts), simulation, and rest machining.
+- **Tool numbers + machine field**: Tools have both `tool_number` (T1, T2) and `name`. Tool numbers are NOT unique within a project — uniqueness is scoped per `machine` value, supporting multi-machine workflows. Post-processor decides whether to call by number or name.
 - **Tools carry recommended cutting data** (feed, speed, coolant) that auto-populates operations when selected. User can always override per-operation.
-- **Tool library is global** (persistent across projects). Tools are copied into a project and can be edited per-project.
+- **Tool library is global** (persistent across projects). Tools are copied into a project and can be edited per-project. Import/export via JSON.
 - **Heidenhain is not a G-code dialect** — it's a completely different language (conversational format). The PostProcessor `generate()` method is designed to be fully overridable for this reason.
 - **Part provenance** tracks where geometry came from (file path, Onshape doc ID, etc.) so it can be refreshed from source.
 - **Part update pipeline** (diff → registration → change report → operation audit → user review) ensures CAM operations are preserved when the CAD model changes. Never silently break a project.
 - **Post-processor plugin system** uses Python entry_points so third-party packages can register custom post-processors.
-- **Face selection for orientation**: User clicks a face on the mesh to set "top" (Z+). System orients part so face normal points Z+, Z=0 at face surface.
+- **Face selection for orientation**: User clicks a face on the tessellated mesh → `face_ids[triangle_index]` maps to B-rep face → backend reads face normal, computes orientation transform. Z+ up, Z=0 at face surface.
+- **Implementation order**: 2.5D projects first (DXF/SVG → toolpaths → NC code, Phases 1-3 = MVP). 3D projects (STEP/STL, Three.js viewport) layered on in Phase 5.
+
+## Discussion Documents
+
+Design discussions and decision records live in `discussions/`:
+
+| Doc | Contents |
+|-----|----------|
+| `DECISIONS.md` | **Quick-reference index** of all decisions with links to source docs |
+| `api.md` | API review — gaps, comparisons with other CAM tools, Thomas's decisions inline |
+| `brep-geometry.md` | B-rep architecture — data model, import pipeline, toolpath impact, decisions table |
+| `opencascade-bindings.md` | Assessment of opencascade-rs crate — coverage, gaps, build |
+| `deferred-ideas.md` | Parked items — endpoint examples, face grouping details, setup sheets |

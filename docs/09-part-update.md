@@ -62,13 +62,13 @@ pub struct GeometryDiff {
     pub new_bbox: BoundingBox,
     pub bbox_delta: BoundingBox,          // Per-axis size difference
 
-    // Volume/area (for meshes)
+    // Volume/area (from B-rep)
     pub old_volume: Option<f64>,
     pub new_volume: Option<f64>,
     pub old_surface_area: Option<f64>,
     pub new_surface_area: Option<f64>,
 
-    // Topology (approximate — from mesh)
+    // Topology (from B-rep — exact face/edge counts)
     pub old_face_count: usize,
     pub new_face_count: usize,
     pub topology_changed: bool,
@@ -107,19 +107,20 @@ Find the rigid transform (translation + rotation) that best aligns the new geome
 
 ### Approach: ICP with Feature Matching
 
-**For mesh-to-mesh (STL) alignment:**
+**For B-rep shape alignment (STEP/STL):**
 
 1. **Bounding box pre-alignment**: Translate so centroids match as initial guess
-2. **ICP (Iterative Closest Point)**: Refine alignment iteratively. Sample points from both meshes, find closest pairs, compute optimal rigid transform, repeat until convergence. The ICP implementation is custom Rust using nalgebra for the SVD-based transform computation.
-3. **Validate**: If the residual error after ICP is below threshold, the alignment is good. If not, fall back to bounding-box alignment and flag for user review.
+2. **ICP (Iterative Closest Point)**: Refine alignment iteratively. Sample points from both shapes (via tessellation), find closest pairs, compute optimal rigid transform, repeat until convergence. The ICP implementation is custom Rust using nalgebra for the SVD-based transform computation.
+3. **Feature-based matching**: With B-rep, faces can be matched by surface type + area + adjacency rather than just geometric proximity. This is more robust than pure ICP on vertex clouds.
+4. **Validate**: If the residual error after ICP is below threshold, the alignment is good. If not, fall back to bounding-box alignment and flag for user review.
 
 ```rust
 pub fn register_geometries(
-    old_mesh: &TriMesh,
-    new_mesh: &TriMesh,
+    old_shape: &TopoDS_Shape,
+    new_shape: &TopoDS_Shape,
     method: RegistrationMethod,
 ) -> RegistrationResult {
-    /// Find the transform that aligns new_mesh to old_mesh's coordinate frame.
+    /// Find the transform that aligns new_shape to old_shape's coordinate frame.
     /// Returns the 4x4 transform matrix and a confidence score.
 }
 
@@ -211,7 +212,7 @@ For each operation, run these checks against the new geometry:
 - Auto-adjust: If part thickness changed proportionally, offer to scale depths
 
 **Contour checks** (for profile/pocket):
-- Slice the new mesh at the operation's Z depths
+- Section the new B-rep shape at the operation's Z depths (via `BRepAlgoAPI_Section`)
 - Compare the new cross-section with the old one using geo:
   - Symmetric difference area → how much changed
   - Small change → `Ok` or `Review`
@@ -321,7 +322,6 @@ This gives a full audit trail of how the part evolved and what adjustments were 
 
 ## Implementation Phase
 
-Part update is a Phase 3-4 feature:
-- Phase 3: Basic "replace geometry" with diff report and stock check (no ICP, no operation audit)
-- Phase 4: Full registration, operation audit, auto-adjustments
-- Phase 5: Automatic update from Onshape/FreeCAD with change detection polling
+Part update is a Phase 6 feature:
+- Phase 6 (initial): Basic "replace geometry" with diff report and stock check (no ICP, no operation audit)
+- Phase 6 (full): Registration, operation audit, auto-adjustments, automatic update from Onshape/FreeCAD

@@ -27,10 +27,10 @@ A browser-based CAM (Computer-Aided Manufacturing) tool that generates NC code f
 │                    ↑                │  fanuc         │   │
 │  ┌─────────┐  ┌──────────┐          │  heidenhain    │   │
 │  │   io/   │  │toolpath/ │          └───────────────┘   │
-│  │ stl     │  │ slicer   │                              │
+│  │ step    │  │ slicer   │                              │
 │  │ dxf     │  │ offset   │                              │
-│  │ svg     │  │ facing   │                              │
-│  │ step    │  │ profile  │                              │
+│  │ stl     │  │ facing   │                              │
+│  │ svg     │  │ profile  │                              │
 │  └─────────┘  │ pocket   │                              │
 │               └──────────┘                              │
 └─────────────────────────────────────────────────────────┘
@@ -98,13 +98,9 @@ Every change is persisted immediately server-side. There is no save button and n
 | Async runtime | tokio | MIT | Industry standard Rust async runtime |
 | Serialization | serde + serde_json | MIT | Standard Rust serialization |
 | HTTP client (integrations) | reqwest | MIT/Apache | Async HTTP client for Onshape API etc. |
-| STL import | stl_io / nom_stl | MIT | Fast STL parsing in Rust |
-| DXF import | dxf-rs | MIT/Apache | DXF file parsing |
-| SVG import | usvg | MPL-2.0 | SVG parsing and simplification |
-| STEP import | opencascade-rs | LGPL | OpenCascade Rust bindings (deferred, heavy dep) |
+| Geometry kernel | opencascade-rs | LGPL | OpenCascade Rust bindings — B-rep geometry, STEP/STL/DXF import, sectioning, tessellation |
 | 2D geometry | geo + geo-clipper | MIT/Apache | Rust computational geometry with Clipper2 bindings |
 | Polygon offset | clipper2 (via geo-clipper) | BSL-1.0 | Fast polygon offsetting for toolpath compensation |
-| Mesh operations | Custom + parry3d | Apache | Mesh slicing, bounding boxes, transforms |
 | Linear algebra | nalgebra / glam | MIT/Apache | Vectors, matrices, transforms |
 | Python bridge | PyO3 + maturin | MIT/Apache | Rust ↔ Python FFI for post-processors |
 | Post-processor runtime | Python (embedded via PyO3) | — | Post-processor plugin execution |

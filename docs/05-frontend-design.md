@@ -172,15 +172,15 @@ Controls:
 
 ```bash
 # Terminal 1: Backend
-uv run python -m camproject --dev    # FastAPI with auto-reload
+cargo run -- --dev --port 8000       # Axum with CORS enabled, API only
 
 # Terminal 2: Frontend
 cd frontend && npm run dev           # Vite dev server with proxy to backend
 ```
 
-Vite proxies `/api/*` to the FastAPI backend during development.
+Vite proxies `/api/*` to the axum backend during development.
 
-For production, the frontend is built (`npm run build`) and the FastAPI app serves the static files from `frontend/dist/`.
+For production, the frontend is built (`npm run build`) and the axum server serves the static files from `frontend/dist/`.
 
 ### File Structure
 
@@ -229,9 +229,6 @@ class CAMApi {
   // Parts
   async importFile(file: File): Promise<Part>
   async getPartMesh(partId: string): Promise<MeshData>
-
-  // Stock
-  async setStock(stock: StockDefinition): Promise<void>
 
   // Tools
   async getTools(): Promise<Tool[]>

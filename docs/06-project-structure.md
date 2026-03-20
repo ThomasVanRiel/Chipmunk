@@ -37,7 +37,7 @@ CAMproject/
 │   │   └── units.rs                # mm/inch enum and conversion
 │   ├── toolpath/
 │   │   ├── mod.rs
-│   │   ├── slicer.rs               # Mesh → 2D cross-sections
+│   │   ├── slicer.rs               # B-rep section at Z → exact 2D curves
 │   │   ├── offset.rs               # Polygon offset (clipper2 wrapper)
 │   │   ├── facing.rs               # Facing toolpath generator
 │   │   ├── profile.rs              # Profile toolpath generator
@@ -52,10 +52,11 @@ CAMproject/
 │   │   └── bridge.rs               # PyO3 bridge: NCBlock → Python objects
 │   ├── io/
 │   │   ├── mod.rs
-│   │   ├── stl_reader.rs           # STL → PartGeometry
-│   │   ├── dxf_reader.rs           # DXF → PartGeometry
-│   │   ├── svg_reader.rs           # SVG → PartGeometry
-│   │   ├── step_reader.rs          # STEP → PartGeometry (stub → Phase 5)
+│   │   ├── step_reader.rs          # STEP → TopoDS_Shape (via OpenCascade)
+│   │   ├── stl_reader.rs           # STL → TopoDS_Shape (via OpenCascade sewing)
+│   │   ├── dxf_reader.rs           # DXF → TopoDS_Wire/Face (2.5D projects)
+│   │   ├── svg_reader.rs           # SVG → TopoDS_Wire/Face (2.5D projects)
+│   │   ├── brep_io.rs              # Read/write .brep files (shape persistence)
 │   │   └── project_file.rs         # .camproj save/load (serde JSON)
 │   ├── integrations/
 │   │   ├── mod.rs
@@ -151,15 +152,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Geometry
-geo = "0.29"
+opencascade-rs = "0.2"             # B-rep geometry kernel (required)
+geo = "0.29"                       # 2D geometry for polygon offset in toolpath generators
 geo-clipper = "0.8"                # Clipper2 bindings for polygon offset
 nalgebra = "0.33"                  # Linear algebra, transforms
-parry3d = "0.17"                   # 3D collision/geometry (mesh slicing)
-
-# File I/O
-stl_io = "0.7"                     # STL reading
-dxf-rs = "0.6"                     # DXF reading
-usvg = "0.44"                      # SVG parsing
 
 # Python bridge (for post-processors)
 pyo3 = { version = "0.23", features = ["auto-initialize"] }
@@ -177,12 +173,7 @@ axum-test = "16"                   # HTTP testing for axum
 tempfile = "3"
 approx = "0.5"                     # Float comparison in tests
 
-[features]
-step = ["dep:opencascade-rs"]      # Optional STEP/OpenCascade support
-
-[dependencies.opencascade-rs]
-version = "0.2"
-optional = true
+# No feature flags for geometry — OpenCascade is always required
 ```
 
 ## Post-Processor Python Package (pyproject.toml)
@@ -230,7 +221,6 @@ line-length = 100
 # Build the Rust backend
 cargo build                          # Debug build
 cargo build --release                # Release build
-cargo build --features step          # With STEP/OpenCascade support
 
 # Run the server
 cargo run                            # Production: serves frontend from frontend/dist/
@@ -270,7 +260,7 @@ npm run build                        # Outputs to frontend/dist/
 api/  →  core/, toolpath/, nc/, io/, integrations/
           (API layer can import everything)
 
-core/ →  (no internal dependencies, only external: geo, nalgebra, serde)
+core/ →  (no internal dependencies, only external: opencascade-rs, geo, nalgebra, serde)
 
 toolpath/ →  core/
               (toolpath generators use core types)

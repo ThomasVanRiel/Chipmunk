@@ -28,7 +28,7 @@ CAMproject should be able to connect to external CAD systems to import geometry 
                            └──────────────────────┘
 ```
 
-The integration layer sits **above** the existing `io/` readers. It handles authentication, API communication, and model selection — then passes the retrieved geometry (as STL/STEP bytes or file) to the existing readers. This means the core CAM logic never knows or cares where the geometry came from.
+The integration layer sits **above** the existing `io/` readers. It handles authentication, API communication, and model selection — then passes the retrieved geometry (as STEP or STL bytes) to the existing readers, which use OpenCascade to produce `TopoDS_Shape` B-rep geometry. This means the core CAM logic never knows or cares where the geometry came from.
 
 ## Integration Interface
 
@@ -107,7 +107,7 @@ Onshape provides REST endpoints for:
 1. User connects their Onshape account (OAuth2 flow or API key entry)
 2. User browses their Onshape documents in a dialog within CAMproject
 3. User selects a part → CAMproject fetches it as STEP (preferred) or STL
-4. The geometry is passed to `step_reader.rs` or `stl_reader.rs` → `PartGeometry`
+4. The geometry is passed to `step_reader.rs` or `stl_reader.rs` → `TopoDS_Shape` → `PartGeometry`
 5. The `PartGeometry` stores the Onshape reference (document ID, part ID, version)
 6. On "refresh", CAMproject checks if the version has changed and re-imports if so
 
