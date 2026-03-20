@@ -28,6 +28,8 @@ class BlockType(Enum):
     COOLANT_ON = "coolant_on"       # M8/M7
     COOLANT_OFF = "coolant_off"     # M9
     DWELL = "dwell"                 # G4
+    STOP = "stop"                   # M0 — mandatory program stop
+    OPTIONAL_STOP = "optional_stop" # M1 — optional stop (operator switch)
     PROGRAM_END = "program_end"     # M30/M2
     SET_UNITS = "set_units"         # G20/G21
     SET_WORK_OFFSET = "set_work_offset"  # G54-G59

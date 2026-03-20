@@ -15,8 +15,12 @@ All endpoints are prefixed with `/api/`.
 | `POST` | `/api/project` | Create a new project |
 | `GET` | `/api/project` | Get current project state |
 | `PUT` | `/api/project` | Update project settings (name, units) |
-| `POST` | `/api/project/save` | Save project to .camproj file |
 | `POST` | `/api/project/load` | Load project from .camproj file |
+| `POST` | `/api/project/undo` | Undo last action |
+| `POST` | `/api/project/redo` | Redo last undone action |
+| `DELETE` | `/api/project/history` | Clear undo/redo history |
+
+Note: There is no explicit "save" endpoint — the project is auto-persisted on every mutation.
 
 #### `POST /api/project`
 ```json
@@ -24,29 +28,19 @@ All endpoints are prefixed with `/api/`.
 { "name": "My Part", "units": "mm" }
 
 // Response 201
-{ "name": "My Part", "units": "mm", "stock": null, "parts": [], "tools": [], "operations": [] }
+{ "name": "My Part", "units": "mm", "parts": [], "tools": [], "operations": [] }
 ```
 
-### Stock
+### Global Tool Library
+
+Persistent across projects. Tools are copied into a project when selected.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `PUT` | `/api/project/stock` | Define or update stock dimensions |
-| `DELETE` | `/api/project/stock` | Remove stock definition |
-
-#### `PUT /api/project/stock`
-```json
-// Request
-{
-  "width": 100.0,
-  "height": 80.0,
-  "depth": 20.0,
-  "origin": "top_center"
-}
-
-// Response 200
-{ "width": 100.0, "height": 80.0, "depth": 20.0, "origin": "top_center" }
-```
+| `GET` | `/api/tools` | List all tools in global library |
+| `POST` | `/api/tools` | Add a tool to global library |
+| `PUT` | `/api/tools/{id}` | Update a global library tool |
+| `DELETE` | `/api/tools/{id}` | Remove from global library |
 
 ### Parts (Geometry Import)
 
@@ -109,16 +103,19 @@ Returns mesh data optimized for Three.js BufferGeometry.
   "flute_length": 20.0,
   "total_length": 50.0,
   "num_flutes": 2,
-  "default_feed_rate": 800.0,
-  "default_plunge_rate": 300.0,
-  "default_spindle_speed": 18000.0,
-  "default_depth_per_pass": 2.0,
-  "default_stepover": 0.4
+  "recommended_feed_rate": 800.0,
+  "recommended_plunge_rate": 300.0,
+  "recommended_spindle_speed": 18000.0,
+  "recommended_depth_per_pass": 2.0,
+  "recommended_stepover": 0.4,
+  "recommended_coolant": "flood"
 }
 
 // Response 201
 { "id": "...", ...same fields... }
 ```
+
+Tools carry geometry + recommended cutting data. When a tool is selected for an operation, the recommended values pre-fill the operation's parameters. The user can override any value per-operation.
 
 ### Operations
 
@@ -131,6 +128,7 @@ Returns mesh data optimized for Three.js BufferGeometry.
 | `PUT` | `/api/project/operations/reorder` | Change operation execution order |
 | `POST` | `/api/project/operations/{id}/generate` | Generate toolpath for this operation |
 | `POST` | `/api/project/operations/generate-all` | Generate all toolpaths |
+| `POST` | `/api/project/operations/{id}/duplicate` | Duplicate operation (copy all params) |
 
 #### `POST /api/project/operations`
 ```json
@@ -140,9 +138,17 @@ Returns mesh data optimized for Three.js BufferGeometry.
   "type": "pocket",
   "geometry_id": "550e8400-...",
   "tool_id": "660e8400-...",
+  "wcs": {
+    "origin": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "work_offset": "G54"
+  },
+  "feed_rate": 800.0,
+  "plunge_rate": 300.0,
+  "spindle_speed": 18000.0,
+  "depth_per_pass": 2.0,
   "start_depth": 0.0,
   "final_depth": -10.0,
-  "depth_per_pass": 2.0,
   "pocket_stepover": 0.4,
   "pocket_strategy": "contour_parallel"
 }
@@ -202,7 +208,9 @@ Starts toolpath generation. Returns immediately with a job ID. Progress is repor
   { "id": "linuxcnc", "name": "LinuxCNC", "file_extension": ".ngc" },
   { "id": "grbl", "name": "Grbl", "file_extension": ".gcode" },
   { "id": "marlin", "name": "Marlin", "file_extension": ".gcode" },
-  { "id": "fanuc", "name": "Generic Fanuc", "file_extension": ".nc" }
+  { "id": "fanuc", "name": "Generic Fanuc", "file_extension": ".nc" },
+  { "id": "sinumerik", "name": "Sinumerik", "file_extension": ".mpf" },
+  { "id": "heidenhain", "name": "Heidenhain TNC", "file_extension": ".h" }
 ]
 ```
 
@@ -211,7 +219,8 @@ Starts toolpath generation. Returns immediately with a job ID. Progress is repor
 // Request
 {
   "postprocessor": "linuxcnc",
-  "operation_ids": ["op1", "op2"]  // or null for all
+  "operation_ids": ["op1", "op2"],  // or null for all
+  "parameterized_feeds": false      // true = feed rates as variables at top of program
 }
 
 // Response 200

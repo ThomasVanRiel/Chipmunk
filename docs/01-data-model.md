@@ -8,12 +8,14 @@ The data model is centered around a `Project` which contains everything needed t
 
 ```
 Project
-├── stock: StockDefinition
 ├── parts: list[PartGeometry]
-├── tools: list[Tool]
-└── operations: list[Operation]
-      └── toolpath: Toolpath (generated, not saved)
-            └── segments: list[ToolpathSegment]
+├── tools: list[Tool]              (references global ToolLibrary, editable per-project)
+├── operations: list[Operation]
+│     ├── wcs: WorkCoordinateSystem      (per-operation, supports multi-setup)
+│     ├── stock: StockDefinition | None  (optional, per-operation)
+│     └── toolpath: Toolpath (generated, not saved)
+│           └── segments: list[ToolpathSegment]
+└── history: CommandHistory        (undo/redo)
 ```
 
 ## Core Types
@@ -27,31 +29,53 @@ The root container. Serializable to/from JSON for project save/load.
 class Project:
     name: str
     units: Units                      # MM or INCH
-    stock: StockDefinition | None
     parts: list[PartGeometry]
     tools: list[Tool]
     operations: list[Operation]
+    history: CommandHistory            # Undo/redo log
+    post_processor_id: str | None     # Default post-processor for this project
 ```
 
-### StockDefinition
+### WorkCoordinateSystem
 
-Defines the raw material the part is cut from. Initially just a rectangular box.
+Defines the machine work coordinate origin and orientation relative to the part for a given operation. This is a full coordinate frame (position + rotation), not just an offset. WCS is **per-operation**, enabling multi-setup parts (e.g., flip the part, different WCS for the back side).
+
+Operations sharing the same setup can reference the same WCS values. When operations are grouped into setups (future tree structure), the group defines the WCS and child operations inherit it.
+
+```python
+@dataclass
+class WorkCoordinateSystem:
+    origin: tuple[float, float, float]      # XYZ position relative to part origin
+    rotation: tuple[float, float, float]    # ABC rotation angles (degrees)
+    work_offset: str                        # G54-G59 (which offset register on the machine)
+```
+
+**Default**: Part origin as-imported (0, 0, 0 position, no rotation, G54). The user can change this by:
+- Clicking a point/edge/face on the part to place the origin
+- Typing XYZ coordinates and ABC rotation manually
+- Selecting a preset (top center, corner, etc.)
+
+### StockDefinition (Optional)
+
+Defines the raw material. **Not required** for toolpath generation — the operator knows their stock. Useful later for:
+- Toolpath optimization (avoiding air cuts)
+- Material removal simulation
+- Rest machining (knowing what material remains)
+- Heidenhain `BLK FORM` output
 
 ```python
 @dataclass
 class StockDefinition:
-    width: float          # X dimension
-    height: float         # Y dimension
-    depth: float          # Z dimension
-    origin: Origin        # Where the work coordinate origin sits relative to the stock
-```
+    shape: StockShape                 # BOX or CYLINDER
+    width: float | None               # X dimension (box)
+    height: float | None              # Y dimension (box)
+    depth: float | None               # Z dimension (box)
+    diameter: float | None            # For cylindrical stock
+    length: float | None              # For cylindrical stock
 
-```python
-class Origin(Enum):
-    TOP_CENTER = "top_center"         # X=center, Y=center, Z=top (most common)
-    TOP_LEFT_FRONT = "top_left_front" # X=left, Y=front, Z=top
-    BOTTOM_CENTER = "bottom_center"
-    # ... other common conventions
+class StockShape(Enum):
+    BOX = "box"
+    CYLINDER = "cylinder"
 ```
 
 ### PartGeometry
@@ -93,7 +117,9 @@ class PartGeometry:
 
 ### Tool
 
-Defines a cutting tool. Different tool types share a common base with type-specific fields.
+Defines a cutting tool's physical geometry and recommended cutting data. The recommended values auto-populate operation parameters when the tool is selected, but the user can always override per-operation.
+
+Tools are stored in a **global library** (persistent across projects). When added to a project, they are copied in and can be edited per-project without affecting the global library.
 
 ```python
 class ToolType(Enum):
@@ -101,6 +127,12 @@ class ToolType(Enum):
     BALL_NOSE = "ball_nose"
     V_BIT = "v_bit"
     DRILL = "drill"
+
+class CoolantMode(Enum):
+    OFF = "off"
+    FLOOD = "flood"               # M8
+    MIST = "mist"                 # M7
+    THROUGH_TOOL = "through_tool" # M88 or controller-specific
 
 @dataclass
 class Tool:
@@ -112,13 +144,28 @@ class Tool:
     total_length: float
     num_flutes: int
 
-    # Default cutting parameters (can be overridden per-operation)
-    default_feed_rate: float          # mm/min or in/min
-    default_plunge_rate: float
-    default_spindle_speed: float      # RPM
-    default_depth_per_pass: float
-    default_stepover: float           # As fraction of diameter (0.0-1.0)
+    # Recommended cutting data (auto-populates operations, user can override)
+    recommended_feed_rate: float | None       # mm/min
+    recommended_plunge_rate: float | None
+    recommended_spindle_speed: float | None   # RPM
+    recommended_depth_per_pass: float | None
+    recommended_stepover: float | None        # Fraction of diameter (0.0-1.0)
+    recommended_coolant: CoolantMode | None
 ```
+
+**Workflow**: When the user selects a tool for an operation, the operation's cutting parameters are pre-filled from the tool's recommended values. The user can then adjust any value. Once overridden, changing the tool doesn't overwrite the user's edits — only empty/unset fields are populated.
+
+### ToolLibrary
+
+Global tool library stored server-side, independent of any project.
+
+```python
+@dataclass
+class ToolLibrary:
+    tools: list[Tool]
+```
+
+API: `GET/POST/PUT/DELETE /api/tools` (global library, separate from project tools).
 
 ### Operation
 
@@ -159,17 +206,26 @@ class Operation:
     geometry_id: str              # Which PartGeometry to machine
     tool_id: str                  # Which Tool to use
 
-    # Common parameters
-    start_depth: float            # Z start (usually 0 = stock top)
-    final_depth: float            # Z end (negative = into stock)
-    depth_per_pass: float | None  # Override tool default
-    feed_rate: float | None       # Override tool default
-    plunge_rate: float | None     # Override tool default
-    spindle_speed: float | None   # Override tool default
+    # Coordinate system & stock (per-operation, supports multi-setup parts)
+    wcs: WorkCoordinateSystem     # WCS for this operation
+    stock: StockDefinition | None # Optional, for optimization/simulation
+
+    # Cutting parameters (pre-filled from tool recommendations, user can override)
+    feed_rate: float              # mm/min or in/min — XY cutting feed
+    plunge_rate: float            # Feed rate for Z plunges
+    spindle_speed: float          # RPM
+    depth_per_pass: float         # Maximum Z step per pass
+    start_depth: float            # Z start (usually 0 = WCS Z zero)
+    final_depth: float            # Z end (negative = into material)
+    coolant: CoolantMode          # Coolant mode for this operation
+
+    # Machine control
+    stop_before: str | None       # "M0" (mandatory stop) or "M1" (optional stop) before this op
+    stop_after: str | None        # "M0" or "M1" after this op
 
     # Type-specific parameters (set based on operation type)
     # Facing
-    stepover: float | None        # Override tool default
+    stepover: float | None        # As fraction of tool diameter (0.0-1.0)
 
     # Profile
     profile_side: ProfileSide | None
@@ -272,16 +328,55 @@ class BoundingBox:
     max_z: float
 ```
 
-## Serialization
+## Undo/Redo (Command History)
 
-The project is saved as a `.camproj` file, which is a JSON file containing:
+Every mutation to the project is recorded as a command in a persistent, append-only history log. This enables unlimited undo/redo that survives across sessions.
+
+```python
+@dataclass
+class Command:
+    id: str
+    timestamp: str                    # ISO 8601
+    type: str                         # e.g. "add_operation", "update_operation", "delete_tool", ...
+    description: str                  # Human-readable, e.g. "Added facing operation"
+    forward_patch: dict               # JSON patch to apply (redo)
+    reverse_patch: dict               # JSON patch to undo
+
+@dataclass
+class CommandHistory:
+    commands: list[Command]           # Full history, oldest first
+    cursor: int                       # Current position (index of next redo)
+```
+
+**How it works**:
+- Every API mutation (add/edit/delete operation, tool, WCS, etc.) creates a `Command` with both forward and reverse patches
+- **Undo**: Apply `reverse_patch` of command at `cursor - 1`, decrement cursor
+- **Redo**: Apply `forward_patch` of command at `cursor`, increment cursor
+- New mutations after an undo clear the redo tail (commands after cursor are discarded)
+- History is persisted as part of the project — undo works across sessions
+- User can clear history via `DELETE /api/project/history` if the project file grows too large
+
+**What's recorded**: Only data mutations (operations, tools, WCS, part transforms). Toolpath generation is not recorded (toolpaths are regenerated, not undone). Viewport state (camera position, panel layout) is not recorded.
+
+## Operation Duplication
+
+Operations can be duplicated to create a copy with all parameters preserved. This is a common workflow for creating a finishing pass from a roughing pass — duplicate, then adjust depth, feed, and compensation mode.
+
+`POST /api/project/operations/{id}/duplicate` creates a new operation with:
+- All parameters copied from the source
+- Name suffixed with " (copy)"
+- Inserted immediately after the source in the operation list
+- No toolpath (must be generated separately)
+
+## Serialization & Auto-Persistence
+
+The project is **auto-persisted** on every change — there is no save button. The server writes the project state after each mutation. The project file is a `.camproj` JSON file:
 
 ```json
 {
   "version": "1.0",
   "name": "My Project",
   "units": "mm",
-  "stock": { "width": 100, "height": 100, "depth": 20, "origin": "top_center" },
   "parts": [
     {
       "id": "...",
@@ -292,7 +387,8 @@ The project is saved as a `.camproj` file, which is a JSON file containing:
     }
   ],
   "tools": [ ... ],
-  "operations": [ ... ]
+  "operations": [ ... ],
+  "history": { "commands": [...], "cursor": 42 }
 }
 ```
 

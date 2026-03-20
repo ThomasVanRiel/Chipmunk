@@ -10,7 +10,7 @@ If the UI grows more complex in later phases, migrating to a lightweight framewo
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Toolbar: [Open] [Save] [Stock] [Add Op ▼] [Generate] [Export]│
+│  Toolbar: [Open] [Undo] [Redo] [Add Op ▼] [Generate] [Export] │
 ├────────────────────────────────────┬─────────────────────────┤
 │                                    │  Tab: Operations        │
 │                                    │  ┌───────────────────┐  │
@@ -35,9 +35,9 @@ If the UI grows more complex in later phases, migrating to a lightweight framewo
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **3D Viewport** (center): Fills most of the screen. Renders part mesh, stock wireframe, toolpath lines, grid, axes.
+- **3D Viewport** (center): Fills most of the screen. Renders part mesh, toolpath lines, grid, axes. Stock wireframe when defined.
 - **Sidebar** (right, resizable): Tabbed panels for operations, properties, tools, NC preview.
-- **Toolbar** (top): Primary actions.
+- **Toolbar** (top): Primary actions. Includes Undo/Redo buttons (also Ctrl+Z / Ctrl+Shift+Z).
 - **Status bar** (bottom): Units display, toolpath stats, progress during generation.
 
 ## 3D Viewport
@@ -91,42 +91,49 @@ toolpathLines: THREE.Group          // Toolpath visualization
 
 ### Mouse Interaction
 
-For later phases:
-- Click on part geometry to select a face/edge (for operation targeting)
-- Click on toolpath segment to highlight and show info
-- Right-click context menu for common operations
+- **Click face**: Select a face on the mesh — used for:
+  - Part orientation: "set this face as top" (orients Z+ to face normal, Z=0 at face surface)
+  - WCS placement: "set origin here"
+  - Operation geometry selection: "machine this face/pocket/contour"
+- **Click edge**: Select an edge for profile operations
+- **Click toolpath segment**: Highlight and show info (position, feed, move type)
+- **Right-click**: Context menu (add operation on selected face, set as top, set WCS here)
 
 ## Sidebar Panels
 
 ### Operations Panel
 
 Lists all operations in execution order. Each operation shows:
-- Checkbox (enable/disable)
+- **Eye icon**: Toggle toolpath visibility in viewport (per-operation show/hide)
+- Checkbox (enable/disable in NC output)
 - Sequence number
 - Operation name and type icon
 - Status indicator (no toolpath / generated / error)
 
 Actions:
 - **Add**: Dropdown with operation types (Facing, Profile, Pocket, Drill)
+- **Duplicate**: Copy selected operation with all parameters (name suffixed " (copy)")
 - **Delete**: Remove selected operation
 - **Move Up/Down**: Reorder operations
 - **Generate**: Generate toolpath for selected operation
 - **Generate All**: Generate all toolpaths
 
 Selecting an operation:
-- Highlights its toolpath in the 3D view
+- Highlights its toolpath in the 3D view (others dimmed but still visible if eye icon is on)
 - Shows its properties in the Properties panel
 
 ### Properties Panel
 
 Shows parameters for the selected operation. Fields update via the API when changed.
 
-Organized in collapsible groups:
-- **General**: Name, type (read-only), enabled
+Organized in collapsible groups (essentials expanded, advanced collapsed):
+- **General**: Name, type (read-only), enabled, optional (block delete)
+- **WCS**: Origin XYZ, rotation ABC, work offset (G54-G59), "pick on model" button
 - **Geometry**: Part reference, start depth, final depth
-- **Tool**: Tool selection dropdown, feed rate, plunge rate, spindle speed
+- **Tool & Cutting**: Tool selection (from project tools), feed rate, plunge rate, spindle speed
 - **Depth**: Depth per pass, depth strategy
-- **Type-specific**: Stepover (facing/pocket), profile side, cut direction, tabs, pocket strategy
+- **Type-specific**: Stepover (facing/pocket), profile side, cut direction, compensation mode, tabs, pocket strategy
+- **Machine Control** (collapsed): Stop before/after (None / M0 / M1), skip level
 
 ### Tools Panel
 

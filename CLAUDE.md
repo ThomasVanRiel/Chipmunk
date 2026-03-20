@@ -111,7 +111,14 @@ When implementing a feature, read the relevant design doc first. The docs are th
 
 ## Key Design Decisions
 
+- **Trust the operator**: Only error on physically impossible geometry (tool wider than pocket, etc.). Never warn about aggressive feeds or deep cuts — that's the operator's call.
+- **Auto-persistence**: Every change is saved immediately. No save button. Undo/redo via persistent command history (JSON patches). User can clear history if project file grows large.
+- **WCS and stock are per-operation**, not per-project — enables multi-setup parts (flip part, different WCS for back side). Operations sharing a setup use the same WCS values.
+- **Stock is optional** — the operator knows their stock. Stock definition is only needed later for optimization (avoid air cuts), simulation, and rest machining.
+- **Tools carry recommended cutting data** (feed, speed, coolant) that auto-populates operations when selected. User can always override per-operation.
+- **Tool library is global** (persistent across projects). Tools are copied into a project and can be edited per-project.
 - **Heidenhain is not a G-code dialect** — it's a completely different language (conversational format). The PostProcessor `generate()` method is designed to be fully overridable for this reason.
 - **Part provenance** tracks where geometry came from (file path, Onshape doc ID, etc.) so it can be refreshed from source.
 - **Part update pipeline** (diff → registration → change report → operation audit → user review) ensures CAM operations are preserved when the CAD model changes. Never silently break a project.
 - **Post-processor plugin system** uses Python entry_points so third-party packages can register custom post-processors.
+- **Face selection for orientation**: User clicks a face on the mesh to set "top" (Z+). System orients part so face normal points Z+, Z=0 at face surface.

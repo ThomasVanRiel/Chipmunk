@@ -63,6 +63,14 @@ New operations (subclass `Operation`), new post-processors (subclass `PostProces
 
 The `Project` object is the root of all state. The server could theoretically serve multiple projects. All computation functions are pure (inputs → outputs).
 
+### 6. Trust the Operator
+
+The CAM tool is not a nanny. Warnings are shown only when something is **physically impossible** (e.g., tool wider than pocket, depth exceeds part geometry). Suboptimal parameters (aggressive feeds, deep cuts, unconventional strategies) are the operator's prerogative. No "are you sure?" dialogs for valid but aggressive choices.
+
+### 7. Auto-Persistence
+
+Every change is persisted immediately server-side. There is no save button and no "unsaved changes" state. The project is always current. Undo/redo operates on a persistent command history.
+
 ## Technology Choices
 
 | Component | Choice | License | Rationale |
