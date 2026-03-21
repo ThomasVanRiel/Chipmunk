@@ -27,11 +27,11 @@ All `src/`, `postprocessors/`, and `frontend/` paths described below are planned
 
 ## Architecture
 
-**CLI**: Primary interface — `camproject mill`, `camproject drill`, `camproject serve`. Calls the core library directly; no HTTP overhead.
-**API**: Peer interface (axum) — same library functions exposed over REST + WebSocket. Used for future frontend, remote access, or scripting via HTTP. Neither wraps the other.
+**CLI**: Primary interface — `camproject mill`, `camproject drill`, `camproject postprocessors`. Calls the core library directly; no HTTP overhead.
+**API**: Deferred. Will be a peer interface (axum) over the same library functions — not a wrapper around the CLI. Needed before any frontend work. See `tasks/backlog.md`.
 **Geometry kernel**: OpenCascade (via opencascade-rs) — B-rep for exact curves; SVG and DXF import.
 **Post-processors**: Lua (via mlua) — pluggable NC code formatters. ~300KB VM embedded at compile time. Built-ins via `include_str!`; user post-processors are `.lua` files in the config directory.
-**Frontend**: Deferred. Designed for, not yet built. See `tasks/backlog.md`.
+**Frontend**: Deferred. See `tasks/backlog.md`.
 
 ### Data Flow
 
@@ -111,7 +111,7 @@ Detailed design docs live in `docs/`:
 |-----|----------|
 | `00-overview.md` | Architecture, tech choices, design principles |
 | `01-data-model.md` | Core types: Project, PartGeometry, Tool, Operation, Toolpath |
-| `02-api-design.md` | REST API + WebSocket spec with request/response examples |
+| `02-api-design.md` | REST API + WebSocket spec **(DEFERRED — see tasks/backlog.md)** |
 | `03-nc-and-postprocessors.md` | NCBlock IR (Rust), mlua bridge, Lua post-processor API, drill strategies, canned cycles, optional operations |
 | `04-toolpath-algorithms.md` | Slicing, offset, facing, profile, pocket, drill algorithms |
 | `05-frontend-design.md` | Three.js viewport, UI layout, panels, Vite build **(DEFERRED — see tasks/backlog.md)** |
@@ -128,6 +128,7 @@ When implementing a feature, read the relevant design doc first. The docs are th
 
 - **Rust backend + Lua post-processors**: Rust for performance-critical computation (geometry, toolpaths, NC IR). Lua for post-processors because they're the most likely extension point, Lua is designed for embedding, and post-processors are fundamentally string formatters that need no heavy runtime. The entire Lua VM adds ~300KB vs ~50MB for Python. Toolpath operation plugins use Rust traits (compiled in) since geometry code must be fast.
 - **Trust the operator**: Only error on physically impossible geometry (tool wider than pocket, etc.). Never warn about aggressive feeds or deep cuts — that's the operator's call.
+- **Never infer**: If a required parameter is missing or a tool ID cannot be resolved, exit with a hard error to stderr (exit code 1). Never silently fill in defaults, guess values, or infer intent. The user asked the impossible — tell them clearly.
 - **Auto-persistence**: Every change is saved immediately. No save button. Undo/redo via persistent command history (JSON patches). User can clear history if project file grows large.
 - **Setup grouping**: Operations are grouped under setups. Each setup defines WCS, stock, and clearance height. Child operations inherit these with optional per-operation overrides. Full retraction between setups is handled by the post-processor.
 - **Stock is optional** — the operator knows their stock. Stock definition is only needed later for optimization (avoid air cuts), simulation, and rest machining.

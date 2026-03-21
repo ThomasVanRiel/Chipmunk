@@ -161,11 +161,8 @@ camproject mill part.svg --params job.yaml --only-color "#ff0000" --allowance 0.
   - `CutterCompLeft` → `RL`, `CutterCompRight` → `RR`, `CutterCompOff` → `R0`
   - `CoolantOn` → `M8`, `CoolantOff` → `M9`
 
-### Other post-processors (Lua) — milling support
-- [ ] `postprocessors/linuxcnc.lua` — G1/G2/G3, G41/G42, M7/M8
-- [ ] `postprocessors/grbl.lua` — G1/G2/G3, no comp, no coolant
-- [ ] `postprocessors/marlin.lua` — G1/G2/G3, M3/M5
-- [ ] `postprocessors/fanuc.lua` — G1/G2/G3, G41/G42, G90 guard
+### Haas post-processor (Lua) — milling support
+- [ ] `postprocessors/haas.lua` — extend with G1/G2/G3, G41/G42, G90 guard, M7/M8
 
 ---
 

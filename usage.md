@@ -33,13 +33,61 @@ Draw the following, assigning stroke colors as shown. Fill should be set to "non
 
 | What to draw | Stroke color | Hex |
 |---|---|---|
+| 1 small circle (Ø1mm or less) at (0,0) — WCS origin marker | Purple | `#aa00aa` |
 | 2 circles, Ø8.5mm, at (15,20) and (45,20) | Blue | `#0000ff` |
 | 1 rectangle, 30×8mm, centered at (30,20) | Orange | `#ff8800` |
 | 1 rectangle, 60×40mm, the part outline | Red | `#ff0000` |
 
+The purple circle at (0,0) marks the WCS origin — this is the point you will touch off on the machine. It is consumed by the importer and does not become an operation.
+
 > In Inkscape: select an object → Object > Fill and Stroke (Shift+Ctrl+F) → Stroke paint → Flat color → enter hex value.
 
 Save as **`clamp_jaw.svg`**.
+
+---
+
+## Optional: tools.yaml
+
+If you use the same tools across many jobs, define them once in `tools.yaml`. Chipmunk loads two files if present, with the local one taking precedence:
+
+- `~/.config/chipmunk/tools.yaml` — global library
+- `tools.yaml` next to your job file — project-local, overrides global on ID collision
+
+```yaml
+tools:
+  - id: drill_8_5
+    name: "Drill 8.5mm"
+    diameter: 8.5
+    type: drill
+    machine: heidenhain_tnc     # scopes tool_number to this machine's magazine
+    tool_number: 12
+    spindle_speed: 800
+    feed_rate: 80
+
+  - id: em_10
+    name: "End Mill 10mm"
+    diameter: 10.0
+    type: end_mill
+    machine: haas_vf2
+    tool_number: 3
+    spindle_speed: 4000
+    feed_rate: 600
+    plunge_rate: 150
+```
+
+In the job YAML, reference by `id` instead of repeating all parameters:
+
+```yaml
+operations:
+  - color: "#0000ff"
+    type: drill
+    tool: drill_8_5             # all parameters pulled from tools.yaml
+    depth: 14.0                 # operation-specific fields still defined here
+    strategy: peck
+    peck_depth: 4.0
+```
+
+Any field defined directly on the operation overrides the library value. If the `id` is not found or a required field is missing, Chipmunk exits with a hard error — no inference, no defaults.
 
 ---
 
@@ -49,7 +97,9 @@ Create **`clamp_jaw.yaml`** next to the SVG:
 
 ```yaml
 postprocessor: heidenhain
-clearance: 10.0          # Z height for rapid moves, relative to tool tip
+wcs: G54
+wcs_marker_color: "#aa00aa"   # circle of this color in the SVG = WCS origin
+clearance: 10.0               # Z height for rapid moves, relative to WCS zero
 
 operations:
 
@@ -98,12 +148,33 @@ operations:
 
 | Field | Meaning |
 |-------|---------|
-| `clearance` | Z height for all rapid moves. Relative to the tool tip (Z=0 at tip, no length compensation). |
+| `wcs` | WCS offset register on the machine (e.g. `G54`, `G55`). Emitted at program start. |
+| `wcs_marker_color` | SVG stroke color of the WCS origin marker circle. That circle's center = (0,0) in machine coordinates. If omitted, WCS origin is the SVG coordinate origin (bottom-left). |
+| `comment` | Optional operator note. Emitted as a comment block at the start of the operation in the NC file. |
+| `clearance` | Z height for all rapid moves. Relative to WCS zero. |
 | `depth` | Total cutting depth below Z=0. Not used for `strategy: manual`. |
 | `stepdown` | Maximum depth per pass. |
 | `allowance` | Extra material to leave. Set >0 for a roughing pass, 0 for finishing. |
 | `compensation: cam` | Tool radius is offset in software. `controller` emits `RL`/`RR` instead. |
+| `compensation: cam` | Tool radius is offset in software. `controller` emits `RL`/`RR` instead. |
 | `strategy` | Drill strategy — see table below. |
+
+**Feeds and speeds — two input modes:**
+
+Absolute (RPM + mm/min):
+```yaml
+spindle_speed: 8000    # RPM
+feed_rate: 100         # mm/min
+```
+
+Cutting parameters (Chipmunk computes RPM and mm/min from tool diameter):
+```yaml
+cutting_speed: 80      # m/min surface speed
+teeth: 4
+chip_load: 0.02        # mm/tooth
+```
+
+Post-processors that support constant surface speed natively (Sinumerik `G96`, Heidenhain CSS) can emit native cutting speed instead of fixed RPM if they declare this capability.
 
 **Drill strategies:**
 
@@ -124,6 +195,8 @@ Always run with `--dry-run` first to verify the color grouping is correct:
 
 ```
 $ camproject mill clamp_jaw.svg --params clamp_jaw.yaml --dry-run
+
+WCS origin (G54): circle at (0.000, 0.000) — color #aa00aa
 
 Geometry groups found in clamp_jaw.svg:
   #0000ff   2 circles       → drill T1 (Drill 8.5mm)
@@ -231,7 +304,19 @@ END PGM T2_END_MILL_8MM MM
 
 ---
 
-## Step 5 — Machine the part
+## Step 5 — Print the drawing for shop reference
+
+Print the SVG directly from Inkscape at 1:1 scale. Bring it to the machine — it shows hole positions, pocket boundaries, and part dimensions at full size. Useful for:
+
+- Verifying workpiece zero placement before running the program
+- Checking stock alignment by laying the printout over the raw material
+- Identifying features at a glance without opening a file
+
+The stroke colors will print as-is, which can help distinguish operations. No special export needed — `File > Print` in Inkscape.
+
+---
+
+## Step 6 — Machine the part
 
 **T1 — Drill 8.5mm:**
 1. Load T1, touch off Z at tool tip

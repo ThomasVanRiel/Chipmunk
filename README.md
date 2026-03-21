@@ -1,7 +1,5 @@
 # Chipmunk
 
-> Working title. See `naming.md` for candidates.
-
 Open source CAM for people who own a machine and want to cut parts — not subscribe to software.
 
 ---
@@ -9,6 +7,8 @@ Open source CAM for people who own a machine and want to cut parts — not subsc
 ## What is this?
 
 Chipmunk takes a drawing (SVG or DXF) and a short parameter file, and produces NC programs ready to run on your machine. No cloud. No licence fee. No feature locked behind a tier.
+
+Currently supports **drilling and milling (2.5D)**. Turning is on the roadmap.
 
 Post-processors are Lua scripts — small, readable, and easy to extend. Heidenhain TNC is the primary built-in target; a Haas example post-processor is included to show how to add your own. If your machine speaks something else, writing a post-processor does not require touching the core.
 
@@ -52,22 +52,39 @@ You start from a drawing — a DXF from a customer, an export from your CAD tool
 
 ```yaml
 postprocessor: heidenhain
-clearance: 10.0
+clearance: 10.0              # Z height for rapids, relative to WCS zero
 
 operations:
-  - color: "#0000ff"    # your choice — any hex color
+  - color: "#0000ff"         # your choice — any hex color
     type: drill
+    comment: "Drill M8 clearance holes — deburr before assembly"
     tool_number: 1
     tool_name: "Drill 8.5mm"
     tool_diameter: 8.5
-    spindle_speed: 800
-    feed_rate: 80
-    depth: 14.0
-    strategy: peck
-    peck_depth: 4.0
+    spindle_speed: 800       # → S word in TOOL CALL
+    feed_rate: 80            # → feed for plunge moves
+    depth: 14.0              # → total depth (Q201 in CYCL DEF)
+    strategy: peck           # → selects CYCL DEF 203
+    peck_depth: 4.0          # → Q202 infeed depth per peck
+
+  - color: "#ff0000"
+    type: profile
+    comment: "Outside profile — leave 0.1mm, finish by hand if needed"
+    side: outside            # → tool path offset to outside of contour
+    tool_number: 2
+    tool_name: "End Mill 10mm"
+    tool_diameter: 10.0
+    spindle_speed: 4000      # → S word in TOOL CALL
+    feed_rate: 600           # → F word on cutting moves
+    plunge_rate: 150         # → F word on Z plunge moves
+    depth: 12.0              # → total depth below WCS zero
+    stepdown: 4.0            # → Z increment per pass
+    compensation: cam        # cam = offset computed here; controller = emit RL/RR
 ```
 
 Run one command. Get one NC file per tool, ready to transfer to the machine.
+
+The SVG also doubles as a shop drawing — print it at 1:1 scale and bring it to the machine as a setup reference.
 
 See `usage.md` for a full worked example with NC output.
 
@@ -93,6 +110,8 @@ A browser frontend (geometry selection, toolpath preview) is planned but deferre
 **Flexible tool management.** Z=0 is defined in WCS — which often coincides with the tool tip, but does not have to. Tool length compensation is supported but not required. Operations can be grouped into one program or split one file per tool, which works well when loading tools manually without an ATC.
 
 **Trust the operator.** The software will not warn you about aggressive feeds or deep cuts. You know your machine. There is no simulation, no collision check, no gouge check — what you program is what runs.
+
+**No inference.** If a required parameter is missing or a tool ID cannot be resolved, Chipmunk exits with a hard error. No silent defaults, no guessing. Fix the input.
 
 **Post-processors are Lua scripts.** Small, readable, and easy to extend. The toolpath logic and the NC formatting are completely separate — adding support for a new controller means writing a Lua file, not modifying the core. Heidenhain TNC is the primary built-in; a Haas example is included as a starting point for other controllers.
 

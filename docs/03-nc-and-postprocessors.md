@@ -132,6 +132,7 @@ pub fn compile_program(
 3. For each setup (operations grouped by `setup_id`):
    a. Work offset from setup WCS (G54/G55/...)
    b. For each enabled operation in the setup:
+      - Comment block (if `operation.comment` is set — operator note in the NC file)
       - Tool change
       - Spindle on at specified RPM
       - Coolant on (if enabled)
@@ -172,7 +173,11 @@ M.optional_skip_strategy = "block_delete"
 -- Required: generate complete NC code from the block list.
 -- blocks: array of block tables (see IR section above)
 -- context: program context table
--- Returns: NC code as a single string
+-- Returns: NC code as a single string on success.
+-- On error: return nil, "descriptive error message"
+-- Chipmunk prints the message to stderr and exits with code 1.
+-- Use this for machine-specific validation (e.g. overtravel, unsupported cycle).
+-- Content is free-form — no structured error types.
 function M.generate(blocks, context)
     local out = {}
 

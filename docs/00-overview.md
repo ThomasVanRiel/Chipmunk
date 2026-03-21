@@ -4,63 +4,42 @@
 
 A CLI-first CAM (Computer-Aided Manufacturing) tool that generates NC code for CNC milling machines. SVG or DXF files are used as input, machining operations are defined via YAML job files, and the tool exports controller-agnostic NC code through pluggable post-processors.
 
-A REST API and browser frontend exist as a parallel interface for future use (remote access, GUI workflows) but the CLI is the primary interface.
+The CLI is the primary and only interface for Phases 1–4. A REST API and browser frontend are deferred to the backlog — the architecture keeps them decoupled so they can be added later without refactoring.
 
 ## High-Level Architecture
 
 ```
-  ┌─────────────────────┐         ┌──────────────────────┐
-  │       CLI            │         │   API (axum)          │
-  │  camproject mill     │         │   REST + WebSocket    │
-  │  camproject drill    │         │   (future frontend,   │
-  │  camproject serve    │         │    remote access)     │
-  └──────────┬──────────┘         └──────────┬───────────┘
-             │                               │
-             │         call directly         │
-             └──────────────┬────────────────┘
-                            │
-          ┌─────────────────▼─────────────────────┐
-          │             Core Library               │
-          │                                        │
-          │  ┌─────────┐  ┌──────────┐  ┌──────┐  │
-          │  │  core/  │  │toolpath/ │  │  nc/ │  │
-          │  │ project │  │ facing   │  │  IR  │  │
-          │  │ geometry│  │ profile  │  │ comp │  │
-          │  │ tool    │  │ pocket   │  │      │  │
-          │  │ operation│ │ drill    │  └──┬───┘  │
-          │  └─────────┘  │ offset   │     │      │
-          │               │ depth    │     │      │
-          │  ┌─────────┐  └──────────┘     │      │
-          │  │   io/   │              ┌────▼────┐  │
-          │  │  svg    │              │  post-  │  │
-          │  │  dxf    │              │processors│  │
-          │  │  brep   │              │  (Lua)  │  │
-          │  └─────────┘              └─────────┘  │
-          └────────────────────────────────────────┘
+  ┌─────────────────────────────────┐
+  │              CLI                │
+  │  camproject mill                │
+  │  camproject drill               │
+  │  camproject postprocessors      │
+  └──────────────┬──────────────────┘
+                 │  calls directly
+                 ▼
+  ┌──────────────────────────────────────────┐
+  │              Core Library                │
+  │                                          │
+  │  ┌─────────┐  ┌──────────┐  ┌────────┐  │
+  │  │  core/  │  │toolpath/ │  │   nc/  │  │
+  │  │ project │  │ facing   │  │   IR   │  │
+  │  │ geometry│  │ profile  │  │  comp  │  │
+  │  │ tool    │  │ pocket   │  │        │  │
+  │  │operation│  │ drill    │  └───┬────┘  │
+  │  └─────────┘  │ offset   │      │       │
+  │               │ depth    │      │       │
+  │  ┌─────────┐  └──────────┘      │       │
+  │  │   io/   │              ┌─────▼────┐  │
+  │  │  svg    │              │  post-   │  │
+  │  │  dxf    │              │processors│  │
+  │  │  brep   │              │  (Lua)   │  │
+  │  └─────────┘              └──────────┘  │
+  └──────────────────────────────────────────┘
+
+  (REST API — deferred, see tasks/backlog.md)
 ```
 
-The CLI and API are **peer-level thin shells** over the same library. The CLI calls library functions directly — no HTTP, no server process. The API does the same via HTTP handlers. Neither knows about the other.
-
-## CLI and API Relationship
-
-```
-            core library functions
-                    │
-        ┌───────────┴───────────┐
-        │                       │
-  cli/mill.rs              api/routes.rs
-  ┌──────────────┐         ┌──────────────┐
-  │ parse args   │         │ parse request│
-  │ call library │         │ call library │
-  │ write files  │         │ return JSON  │
-  └──────────────┘         └──────────────┘
-```
-
-Consequences:
-- **CLI never goes through HTTP** — no server startup per invocation, no serialization overhead
-- **API always calls real code** — same paths as the CLI, implicitly tested when CLI tests pass
-- **No refactoring needed** when the frontend arrives — the API is already wired to working logic
-- **Remote access works today** — `camproject serve` exposes the same operations over HTTP for scripting, CI, or a future frontend
+The CLI calls library functions directly — no HTTP, no server process. When the REST API is built it will be a peer-level thin shell over the same library, not a wrapper around the CLI.
 
 ## Data Flow
 
@@ -102,6 +81,10 @@ The CLI is the primary interface during active development — it gives direct h
 
 Operations are selected by SVG stroke color. Each color maps to a full operation configuration in the YAML job file. Circles → drill points or circular pockets. Closed paths → profile, pocket, or facing area. One SVG + one YAML → one or more NC files (split by tool).
 
+The WCS origin is defined by a marker circle drawn in the SVG at a dedicated color declared in the YAML (`wcs_marker_color`). The importer reads the circle's center as the WCS (0, 0) and excludes it from operation geometry. If `wcs_marker_color` is not set, the WCS origin falls at the SVG coordinate origin (bottom-left corner after Y-axis correction).
+
+A single-color SVG also works: the entire file is treated as one operation group, no color disambiguation needed.
+
 ### 4. Controller agnosticism
 
 Toolpaths are generated as abstract segment sequences (rapid, linear, arc). These are compiled to a controller-neutral IR (`NCBlock` list). Only the final Lua post-processor step formats machine-specific output. The same toolpath compiles to Heidenhain conversational, G-code, or any other format.
@@ -134,6 +117,8 @@ Post-processors are Lua modules embedded at compile time (`include_str!`). User 
 
 ## Deferred (backlog)
 
+- **REST API** — axum server, peer to the CLI, required before any frontend work
+- **Turning** — lathe toolpaths, turning cycles, facing/profiling/threading
 - **Browser frontend** — 2D canvas viewport, operation panels, NC preview
 - **3D projects** — STEP/STL input, B-rep slicer, Three.js viewport
 - **Inkscape extension** — Extensions > CAM menu; calls CLI or local API

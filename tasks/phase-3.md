@@ -69,18 +69,8 @@ This means:
 - [ ] `postprocessors/haas.lua` — `OptionalBlock`: prefix lines with `/`
 
 ### Per-program export
-- [ ] `POST /api/project/export/preview` — extend body with `{ operation_ids?: [uuid] }` filter
-- [ ] `POST /api/project/export` — same filter, downloads single file
-- [ ] `POST /api/project/export/by-tool` — splits operations by tool, returns ZIP of one NC file per tool, named `<tool_number>_<tool_name>.<ext>` (e.g., `T1_CENTER_DRILL.H`, `T2_DRILL_6.H`)
 - [ ] NC compiler: when compiling a single-tool program, omit `TOOL CALL` if `tool_length_mode == ZeroAtTip` (tool is already loaded and zeroed)
-- [ ] `GET /api/project/export/tool-groups` — returns list of `{ tool, operations[] }` groups for preview before batch export
-
-### Frontend
-- [ ] **Export dialog**: "Single file" vs "One file per tool" toggle
-- [ ] "One file per tool" mode: preview list of files that will be generated (tool name, operation count, estimated line count)
-- [ ] **Download ZIP** for multi-file export
-- [ ] Per-operation "optional" toggle in operations panel (sets `optional_skip_level`)
-- [ ] **Z-zero mode** selector per setup: "Tool tip (no compensation)" vs "Measured offset" — shown prominently since it affects the entire program
+- [ ] `--output-dir` CLI flag: writes one NC file per tool, named `T<n>_<name>.<ext>`
 
 ---
 
@@ -95,7 +85,7 @@ This means:
   - `tests/fixtures/nc/heidenhain_cycl200.H` — CYCL DEF 200, three holes, Z-zero-at-tip mode
   - `tests/fixtures/nc/heidenhain_cycl203.H` — CYCL DEF 203 peck
   - `tests/fixtures/nc/haas_g83.nc` — G83 peck
-- [ ] Per-program export test: project with two tools → `export/by-tool` → two NC files with correct operation subsets
+- [ ] Per-program export test: two-tool job → `--output-dir` → two NC files with correct operation subsets
 - [ ] Optional operation test: `optional_skip_level: 1` → Heidenhain emits `M1`, Haas prefixes `/`
 
 ---

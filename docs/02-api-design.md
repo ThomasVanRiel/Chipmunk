@@ -1,5 +1,7 @@
 # API Design
 
+> **DEFERRED** — The REST API is not being built in Phases 1–4. The CLI is the primary interface. The API will be implemented when a frontend or remote access is needed. See `tasks/backlog.md`. This document defines the intended design and serves as a contract for future implementation.
+
 ## Overview
 
 The backend (Rust/axum) exposes a REST API for CRUD operations and file transfers, plus a WebSocket for real-time progress updates during toolpath generation.

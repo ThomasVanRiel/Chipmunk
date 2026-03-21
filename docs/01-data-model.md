@@ -56,9 +56,7 @@ A project is one type or the other — set at creation time, not changeable afte
 
 ### WorkCoordinateSystem
 
-Defines the machine work coordinate origin and orientation relative to the part for a given operation. This is a full coordinate frame (position + rotation), not just an offset. WCS is **per-operation**, enabling multi-setup parts (e.g., flip the part, different WCS for the back side).
-
-Operations sharing the same setup can reference the same WCS values. When operations are grouped into setups (future tree structure), the group defines the WCS and child operations inherit it.
+Defines the machine work coordinate origin and orientation relative to the part for a given setup. This is a full coordinate frame (position + rotation), not just an offset.
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,10 +67,9 @@ pub struct WorkCoordinateSystem {
 }
 ```
 
-**Default**: Part origin as-imported (0, 0, 0 position, no rotation, G54). The user can change this by:
-- Clicking a point/edge/face on the part to place the origin
-- Typing XYZ coordinates and ABC rotation manually
-- Selecting a preset (top center, corner, etc.)
+**For SVG/CLI jobs**: The WCS origin is derived at import time from a marker circle drawn at a dedicated color declared in the YAML (`wcs_marker_color`). The circle's center becomes `origin`. The `work_offset` comes from the `wcs` field in the YAML (e.g. `G54`). The marker circle is consumed by the importer and excluded from operation geometry. If `wcs_marker_color` is not declared, `origin` defaults to `[0, 0, 0]` (SVG coordinate origin = bottom-left corner after Y-axis correction).
+
+**For the deferred frontend**: The user can set the origin by clicking a point/edge/face, entering XYZ/ABC values manually, or selecting a preset (top center, corner, etc.).
 
 ### Setup
 
@@ -93,7 +90,7 @@ pub struct Setup {
 
 **WCS inheritance**: Operations within a setup inherit its WCS, stock, and clearance height. An operation can override any inherited value by setting it explicitly. If the setup's WCS changes, all operations that haven't overridden it update automatically.
 
-NC export is typically per-setup (one program per fixture).
+**One YAML = one setup**: In the CLI workflow each YAML job file defines a single setup. Multiple setups (e.g. flip the part) use separate YAML files and produce separate NC files. Input SVG and output file path are CLI arguments — they are not part of the YAML.
 
 ### StockDefinition (Optional)
 
@@ -291,7 +288,14 @@ pub struct Tool {
 
 ### ToolLibrary
 
-Global tool library stored server-side, independent of any project.
+Tools are loaded from up to four sources, resolved in priority order (highest first):
+
+1. **Hardcoded inline on the operation** — tool parameters written directly in the operation entry, no ID reference
+2. **Inline `tools:` section** in the job YAML — above the `operations:` block, same format as the files
+3. `tools.yaml` next to the job file — project-local library
+4. `~/.config/chipmunk/tools.yaml` — user global library
+
+On ID collision between sources 2–4, the higher-priority source wins. All sources are merged into a single flat lookup table before any operation is resolved.
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,6 +303,73 @@ pub struct ToolLibrary {
     pub tools: Vec<Tool>,
 }
 ```
+
+**Resolution rules**:
+- If an operation has tool parameters written directly on it (no `tool:` ID field), those are used as-is — no library lookup.
+- If an operation has a `tool: <id>` field, the merged library is searched in priority order (sources 2–4). Any additional fields on the operation override the library values.
+- If the referenced `id` is not found, or a required field is missing and not defined on the operation: **hard error to stderr, exit 1**. No inference, no defaults, no silent fallback.
+
+Example `tools.yaml` (same format for both file sources):
+```yaml
+tools:
+  - id: drill_8_5
+    name: "Drill 8.5mm"
+    diameter: 8.5
+    type: drill
+    machine: heidenhain_tnc     # scopes tool_number to this machine
+    tool_number: 12             # magazine pocket
+    spindle_speed: 800
+    feed_rate: 80
+
+  - id: em_10
+    name: "End Mill 10mm"
+    diameter: 10.0
+    type: end_mill
+    machine: haas_vf2
+    tool_number: 3
+    spindle_speed: 4000
+    feed_rate: 600
+    plunge_rate: 150
+```
+
+Inline tools in the job YAML — `tools:` appears before `operations:`, same format as the tool files:
+```yaml
+tools:
+  - id: drill_8_5
+    name: "Drill 8.5mm"
+    diameter: 8.5
+    type: drill
+    machine: heidenhain_tnc
+    tool_number: 12
+    spindle_speed: 800
+    feed_rate: 80
+
+operations:
+  - color: "#0000ff"
+    type: drill
+    tool: drill_8_5             # resolved from inline tools section above
+    depth: 14.0
+    strategy: peck
+    peck_depth: 4.0
+```
+
+The inline `tools:` section is useful for self-contained job files that don't depend on any external library, or to override a globally-defined tool for a single job without editing shared files. Referencing a tool works identically regardless of which source defines it — the `tool:` field is just an ID string.
+
+Hardcoded inline on the operation — no `tool:` ID, all parameters written directly:
+```yaml
+operations:
+  - color: "#0000ff"
+    type: drill
+    diameter: 8.5
+    tool_number: 12
+    spindle_speed: 800
+    feed_rate: 80
+    depth: 14.0
+    strategy: peck
+    peck_depth: 4.0
+```
+
+This is the most self-contained form. Useful for one-off jobs or when the tool isn't reused anywhere else in the file.
 
 API: `GET/POST/PUT/DELETE /api/tools` (global library, separate from project tools).
 
@@ -340,6 +411,7 @@ pub struct Operation {
     pub name: String,
     pub operation_type: OperationType,
     pub enabled: bool,
+    pub comment: Option<String>,   // Operator note — emitted as a Comment block at the start of the operation in the NC output
 
     // Optional at the machine (see 03-nc-and-postprocessors.md "Optional Operations")
     pub optional: bool,            // If true, operator can skip this at the machine
@@ -551,6 +623,7 @@ The project is **auto-persisted** on every change — there is no save button. T
       "id": "...",
       "name": "Setup 1 — Top",
       "wcs": { "origin": [0,0,0], "rotation": [0,0,0], "work_offset": "G54" },
+      "wcs_marker_color": "#aa00aa",
       "stock": { "shape": "box", "width": 110, "height": 85, "depth": 25 },
       "clearance_height": 50.0
     }

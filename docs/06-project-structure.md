@@ -27,11 +27,7 @@ CAMproject/
 │   │   ├── drill.rs                # `camproject drill` subcommand handler
 │   │   ├── mill.rs                 # `camproject mill` subcommand handler
 │   │   └── postprocessors.rs       # `camproject postprocessors` subcommand handler
-│   ├── api/
-│   │   ├── mod.rs                  # API module root, router setup
-│   │   ├── routes.rs               # REST API endpoint handlers
-│   │   ├── websocket.rs            # WebSocket handler for progress
-│   │   └── state.rs                # AppState (shared server state)
+│   ├── api/                        # DEFERRED — add when REST API is implemented
 │   ├── core/
 │   │   ├── mod.rs
 │   │   ├── project.rs              # Project container, save/load
@@ -114,11 +110,11 @@ authors = ["Thomas Van Riel"]
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Web framework (serve subcommand)
-axum = { version = "0.8", features = ["ws", "multipart"] }
-tokio = { version = "1", features = ["full"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+# Web framework (deferred — add when REST API is implemented)
+# axum = { version = "0.8", features = ["ws", "multipart"] }
+# tokio = { version = "1", features = ["full"] }
+# tower = "0.5"
+# tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -143,7 +139,6 @@ anyhow = "1"
 thiserror = "2"
 
 [dev-dependencies]
-axum-test = "16"                   # HTTP testing for axum
 tempfile = "3"
 approx = "0.5"                     # Float comparison in tests
 
@@ -198,7 +193,7 @@ cli/  →  core/, toolpath/, nc/, io/
           (CLI handlers call library functions directly — no HTTP)
 
 api/  →  core/, toolpath/, nc/, io/, integrations/
-          (API handlers call the same library functions — no HTTP to self)
+          (deferred — same pattern as CLI when implemented)
 
 core/ →  (no internal dependencies, only external: opencascade-rs, geo, nalgebra, serde)
 

@@ -99,6 +99,49 @@ For when the source drawing changes and existing operations need to be re-valida
 
 ---
 
+## REST API
+
+Axum HTTP server exposing the same core library functions used by the CLI. Required before any frontend work. The CLI and API are peers — neither wraps the other.
+
+Key design: `camproject serve` starts the server. All endpoints call library functions directly, no HTTP to self.
+
+Endpoints defined in `docs/02-api-design.md`. Implement when a frontend or remote access is needed.
+
+Tasks (when scheduled):
+- [ ] Add axum, tokio, tower, tower-http to `Cargo.toml`
+- [ ] `src/api/mod.rs` — router setup, AppState
+- [ ] `src/api/routes.rs` — endpoint handlers (thin wrappers over library functions)
+- [ ] `GET /api/health`, `GET /api/postprocessors`
+- [ ] Project CRUD: `GET/POST /api/project`, parts upload, export endpoints
+- [ ] Tools, setups, operations CRUD
+- [ ] `camproject serve` subcommand in `src/cli/`
+
+---
+
+## `chipmunk wizard`
+
+Interactive CLI subcommand that guides the user step by step — operation type, coordinates, tool parameters, post-processor, output file. For quick jobs without a drawing or YAML file.
+
+- Prompts in sequence, shows defaults, allows free-form input
+- At the end, optionally writes a YAML file so the session is reproducible
+- Implement after the core CLI workflow is solid and the YAML format is stable
+
+---
+
+## Turning
+
+Lathe toolpaths are structurally different from milling — the part rotates, the tool moves in XZ. The post-processor architecture handles this cleanly (a turning post-processor is just another Lua module), but the toolpath generators and NC IR need turning-specific additions:
+
+- **Turning operations**: facing, OD/ID profiling, grooving, threading, parting
+- **Turning cycles**: G71/G72 roughing cycles (Fanuc/Haas), `CYCLE95` (Sinumerik), `TURNING` (Heidenhain)
+- **Coordinate system**: X is diameter (or radius depending on controller), Z is along the spindle axis
+- **Tool nose radius compensation**: equivalent to cutter compensation for mills
+- **Live tooling**: optional — cross-drilling, milling on a turning centre
+
+The Haas example post-processor is a natural starting point since the Haas TL-series lathes use near-standard G-code.
+
+---
+
 ## CAD Integrations
 
 - **Watch folder**: `integrations/watch_folder.rs` — rerun job when SVG changes on disk

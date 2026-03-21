@@ -128,18 +128,6 @@ camproject postprocessors
 
 ---
 
-## REST API (for later frontend — implement but not the test path yet)
-
-- [ ] `GET /api/project/tools`, `POST`, `PUT`, `DELETE`
-- [ ] `GET /api/project/setups`, `POST`, `PUT`, `DELETE`
-- [ ] `GET /api/project/operations`, `POST`, `PUT`, `DELETE`
-- [ ] `POST /api/project/operations/{id}/generate`
-- [ ] `GET /api/postprocessors`
-- [ ] `POST /api/project/export/preview`
-- [ ] `POST /api/project/export`
-
----
-
 ## Deliverable
 
 Test the pipeline on real hardware using only the CLI:

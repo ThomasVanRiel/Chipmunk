@@ -16,10 +16,9 @@ Core philosophy:
 ### Backend Tasks (Rust)
 
 1. **Project scaffolding**
-   - `Cargo.toml` with all dependencies (axum, tokio, serde, opencascade-rs, geo, geo-clipper, mlua, serde_yaml, uuid, chrono, tracing, anyhow, thiserror, clap)
-   - `src/main.rs` — entry point, clap subcommand dispatch
+   - `Cargo.toml` with all dependencies (clap, serde, serde_yaml, opencascade-rs, geo, geo-clipper, mlua, uuid, chrono, tracing, anyhow, thiserror)
+   - `src/main.rs` — entry point, clap subcommand dispatch (`drill`, `mill`, `postprocessors`)
    - `src/lib.rs` — module declarations
-   - `GET /api/health` — health check
 
 2. **Core data model (minimal)**
    - `core/units.rs`: `Units` enum (Mm, Inch)
@@ -40,22 +39,15 @@ Core philosophy:
    - `io/brep_io.rs`: save/load `.brep`
    - `io/project_file.rs`: `.camproj` JSON
 
-6. **REST API (minimal)**
-   - `POST /api/project`, `GET /api/project`
-   - `POST /api/project/parts` — multipart upload SVG/DXF
-   - `GET /api/project/parts`, `GET /api/project/parts/{id}`
-   - `GET /api/project/download`, `POST /api/project/load`
-
 ### Tests
 
-7. `test_svg_reader.rs` — circle, rectangle, open path; stroke color preserved
+6. `test_svg_reader.rs` — circle, rectangle, open path; stroke color preserved
    `test_dxf_reader.rs` — lines, arcs, circles; entity color preserved
    `test_brep_io.rs` — save + reload roundtrip
-   `test_api.rs` — file upload returns correct bounding box
 
 ### Deliverable
 
-`cargo run -- serve` starts. SVG/DXF upload returns geometry metadata with colors. All tests pass.
+SVG and DXF import working — color groups extracted correctly. All import and roundtrip tests pass.
 
 ---
 
@@ -63,22 +55,21 @@ Core philosophy:
 
 **Goal**: First complete end-to-end workflow via CLI. SVG circles → drill points → Heidenhain NC → run on machine.
 
-Target output (three holes, quill confirmation):
+Target output (three holes, operator runs in single block mode):
 ```
 BEGIN PGM DRILL MM
 BLK FORM 0.1 Z X+0.000 Y+0.000 Z-50.000
 BLK FORM 0.2 X+100.000 Y+100.000 Z+0.000
-TOOL CALL 1 Z S2000
-L Z+5.000 FMAX M3
+TOOL CALL 1 Z S0
+L Z+5.000 FMAX
 L X+25.000 Y+15.000 FMAX
-STOP
 L X+75.000 Y+15.000 FMAX
-STOP
 L X+75.000 Y+65.000 FMAX
-STOP
-L Z+50.000 FMAX M5
+L Z+50.000 FMAX
 END PGM DRILL MM
 ```
+
+No STOP blocks, no spindle commands — the operator activates single block mode on the controller and drills by hand between positions.
 
 ### Backend Tasks
 
@@ -143,7 +134,7 @@ Load Ø6 drill    → touch off Z at tip → run T2_DRILL_6.H
 5. **`PostProcessorCapabilities`** — `get_capabilities()` reads `supported_cycles`, `optional_skip_strategy`, `tool_length_compensation` from Lua module
 6. **`ToolLengthMode::ZeroAtTip`** — no G43 / no Heidenhain tool length; set per setup
 7. **Heidenhain canned cycles** — CYCL DEF 200, 203, 207; `L X+n Y+n FMAX M99`
-8. **G-code canned cycles** — linuxcnc G81/G83/G84, fanuc with G90 guard
+8. **G-code canned cycles** — Haas G81/G83/G84 with G90 guard
 9. **Optional operations** — `optional_skip_level` (1–9); Heidenhain: `M1`; G-code: `/` prefix
 10. **Per-program CLI export** — `--output-dir` writes one file per tool; `--dry-run` lists what would be generated
 
@@ -262,7 +253,7 @@ The mapping is entirely user-controlled via YAML — this is just a suggested st
 9. **Pocket generator** — `toolpath/pocket.rs`: contour-parallel/zigzag, helix/plunge/ramp entry, depth passes
 10. **NC IR extensions** — `LinearMove` with feed, `ArcMove`, `SetFeedRate`, `CoolantOn/Off`, `CutterCompLeft/Right/Off`
 11. **Heidenhain milling (Lua)** — `L X+n Y+n F+n`, `CC`/`C DR+/-`, `RL`/`RR`/`R0`, `M8`/`M9`
-12. **Other post-processors (Lua)** — linuxcnc, grbl, marlin, fanuc milling output
+12. **Haas post-processor (Lua)** — extend with G1/G2/G3, G41/G42, M7/M8 milling support
 
 ### Tests
 
@@ -298,6 +289,7 @@ Phases 1–4 cover the full 2.5D machining workflow for a no-tool-changer Heiden
 
 Items with clear design but no scheduled phase. Implement when the core CLI workflow is solid.
 
+- **REST API** — axum server exposing the same library functions over HTTP. Peer to the CLI, not a wrapper. Required before any frontend work. Design in `docs/02-api-design.md`.
 - **Browser frontend** — 2D canvas viewport, operation panels, NC preview. Design in `tasks/backlog.md`.
 - **3D projects** — STEP/STL import, B-rep slicer, Three.js viewport. Most milling is 2.5D; slicing is the same pipeline regardless of input.
 - **Inkscape extension** — appears under Extensions > CAM; calls `camproject` CLI; shows parameter dialog in Inkscape. Eliminates file management step.
