@@ -27,7 +27,7 @@ camproject mill part.svg --params job.yaml --output-dir ./nc/
 
 You do not need a coding background. You need a drawing, a tool, and a machine.
 
-If you run a production workshop, use professional tooling. This project has no error checking, no collision detection, no gouge checking, no safety interlocks, and no simulation. The NC output is what you asked for — nothing more.
+If you run a production workshop, use professional tooling. This project is probably not for you. It lacks error checking, has no collision detection, no gouge checking, no safety interlocks, and no simulation. The NC output is what you asked for — nothing more.
 
 **Attend your machine. At least on the first run.**
 
@@ -78,6 +78,7 @@ See `usage.md` for a full worked example with NC output.
 **Pre-implementation.** The design is complete; code is being written now.
 
 Planned phases:
+
 1. **Scaffolding + import** — SVG/DXF parsing, color grouping, REST API skeleton
 2. **Manual drill** — rapid to XY positions, operator drills by hand in single block mode. First real hardware test.
 3. **Automatic drill cycles** — peck drilling, canned cycles (CYCL DEF 203), per-tool NC file export
