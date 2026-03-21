@@ -68,6 +68,7 @@
 | **quill** | `quill mill part.svg --params job.yaml` | Dual meaning (drill mechanism + writing). Suits the manual drill origin. |
 | **rapids** | `rapids mill part.svg --params job.yaml` | Energetic, recognisable to CNC operators. |
 | **millwright** | `millwright drill holes.dxf` | Craft connotation, slightly long. |
+| **chipmonk** | `chipmonk drill holes.dxf` | Chipmunk + chip. Playful, memorable, completely unique. |
 
 ---
 
