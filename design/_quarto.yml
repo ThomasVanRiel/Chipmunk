@@ -6,9 +6,9 @@ book:
   title: "Chipmunk Design"
   author: "Thomas Van Riel"
   chapters:
+    - index.md
     - part: "Overview"
       chapters:
-        - ../README.md
         - usage.md
     - part: "Design Documents"
       chapters:
@@ -38,6 +38,6 @@ book:
 
 format:
   pdf:
-    output-file: "chipmunk_design.pdf"
+    output-file: "Chipmunk-Design.pdf"
     toc: true
     number-sections: true

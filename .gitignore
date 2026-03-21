@@ -1,6 +1,2 @@
 # Rust build artifacts
 /target/
-
-# Quarto output
-design/chipmunk_design.pdf
-design/.quarto/
