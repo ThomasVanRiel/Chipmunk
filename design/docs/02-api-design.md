@@ -612,7 +612,7 @@ When a frontend is built, the axum server would serve it as static files in prod
 - `GET /` → `frontend/dist/index.html`
 - `GET /assets/*` → `frontend/dist/assets/`
 
-In development, the frontend dev server (Vite on `:5173`) would proxy `/api` requests to the axum backend (`:8000`). For now, `camproject serve` exposes the API only.
+In development, the frontend dev server (Vite on `:5173`) would proxy `/api` requests to the axum backend (`:8000`). For now, `chipmunk-server` exposes the API only.
 
 ## Pagination
 

@@ -78,41 +78,54 @@ END PGM DRILL MM
 
 ## CLI
 
-A `drill` subcommand to test the full pipeline without a frontend. Uses `clap` for argument parsing.
+All input via YAML. Two forms: geometry file (circles extracted as drill points) or explicit `points:` list.
+
+```yaml
+# drill.yaml — from geometry file
+geometry: holes.dxf
+postprocessor: heidenhain
+clearance: 5.0
+
+operations:
+  - color: "#0000ff"
+    type: drill
+    strategy: manual
+    tool_number: 1
+    tool_name: "Center Drill"
+    tool_diameter: 3.0
+    spindle_speed: 2000
+```
+
+```yaml
+# drill.yaml — explicit coordinates (no geometry file)
+postprocessor: heidenhain
+clearance: 5.0
+
+operations:
+  - type: drill
+    strategy: manual
+    tool_number: 1
+    tool_name: "Drill"
+    tool_diameter: 6.0
+    spindle_speed: 1800
+    points:
+      - [25, 15]
+      - [75, 15]
+      - [75, 65]
+```
 
 ```bash
-# From DXF — extract circle centers automatically
-camproject drill holes.dxf \
-  --tool-number 1 --tool-name "Center Drill" --diameter 3 \
-  --spindle-speed 2000 \
-  --clearance 5 \
-  --postprocessor heidenhain \
-  --output center_drill.H
+chipmunk drill.yaml --output DRILL.H
+# or: chipmunk drill.yaml > DRILL.H
 
-# Explicit coordinates (no DXF needed)
-camproject drill \
-  --at 25,15 --at 75,15 --at 75,65 \
-  --tool-number 1 --tool-name "Drill" --diameter 6 \
-  --spindle-speed 1800 \
-  --postprocessor heidenhain
-
-# Print to stdout (no --output flag)
-camproject drill holes.dxf --postprocessor heidenhain
-
-# List available post-processors
-camproject postprocessors
+chipmunk postprocessors
 ```
 
 ### CLI tasks
 - [ ] Add `clap` to `Cargo.toml`
-- [ ] `src/main.rs` — top-level subcommand dispatch: `serve` (existing), `drill`, `postprocessors`
-- [ ] `drill` subcommand args: `[dxf_file]`, `--at X,Y` (repeatable), `--tool-number`, `--tool-name`, `--diameter`, `--spindle-speed`, `--feed`, `--clearance`, `--postprocessor`, `--output`
-- [ ] `drill` handler:
-  - If `dxf_file` given: import → extract circle centers
-  - If `--at` given: use those coordinates directly
-  - Build minimal `Tool`, `Setup`, `Operation` in memory (no project file, no DB)
-  - Generate drill toolpath, compile NC IR, run Lua post-processor
-  - Write to `--output` or print to stdout
+- [ ] `src/bin/chipmunk.rs` — positional YAML argument; `postprocessors` subcommand
+- [ ] YAML handler: load `JobParams`, resolve `geometry:` if present, build `Tool`/`Setup`/`Operation` in memory, generate toolpath, compile NC IR, run Lua post-processor, write to `--output` or stdout
+- [ ] Override flags: `--geometry`, `--postprocessor`, `--output`
 - [ ] `postprocessors` subcommand — print table of `name | file_extension` for all registered post-processors
 - [ ] Error messages: unknown post-processor, no points found, file not found — all to stderr with exit code 1
 
@@ -132,6 +145,6 @@ camproject postprocessors
 
 Test the pipeline on real hardware using only the CLI:
 ```bash
-camproject drill holes.dxf --postprocessor heidenhain --output DRILL.H
+chipmunk drill.yaml --output DRILL.H
 ```
 Transfer `DRILL.H` to Heidenhain TNC. Activate single block mode. Press cycle start — machine rapids to first hole, stops. Operator drills with quill or hand drill, presses cycle start, machine advances to next position. No `STOP` blocks, no spindle commands — single block mode gives the operator full pacing control.

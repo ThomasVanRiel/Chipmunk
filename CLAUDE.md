@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CAMproject is a CLI-first CAM (Computer-Aided Manufacturing) tool for generating NC code for CNC milling machines. SVG or DXF files are used as input geometry; machining operations are defined in YAML job files; NC code is exported through pluggable Lua post-processors. A REST API exists as a peer interface for future use (frontend, remote access) but the CLI is the primary interface.
+Chipmunk is a CLI-first CAM (Computer-Aided Manufacturing) tool for generating NC code for CNC milling machines. Machining jobs are defined in YAML job files that reference SVG or DXF geometry; NC code is exported through pluggable Lua post-processors. A REST API exists as a peer interface for future use (frontend, remote access) but the CLI is the primary interface.
 
 - **License**: MIT
-- **Remote**: `git@github.com:ThomasVanRiel/CAMproject.git`
+- **Remote**: `git@github.com:ThomasVanRiel/Chipmunk.git`
 
 ## Ground Rules for Claude
 
@@ -27,7 +27,7 @@ All `src/`, `postprocessors/`, and `frontend/` paths described below are planned
 
 ## Architecture
 
-**CLI**: Primary interface — `camproject mill`, `camproject drill`, `camproject postprocessors`. Calls the core library directly; no HTTP overhead.
+**CLI**: Primary interface — `chipmunk job.yaml`, `chipmunk postprocessors`. The YAML file is the sole input for NC generation. Calls the core library directly; no HTTP overhead.
 **API**: Deferred. Will be a peer interface (axum) over the same library functions — not a wrapper around the CLI. Needed before any frontend work. See `tasks/backlog.md`.
 **Geometry kernel**: OpenCascade (via opencascade-rs) — B-rep for exact curves; SVG and DXF import.
 **Post-processors**: Lua (via mlua) — pluggable NC code formatters. ~300KB VM embedded at compile time. Built-ins via `include_str!`; user post-processors are `.lua` files in the config directory.
@@ -36,8 +36,7 @@ All `src/`, `postprocessors/`, and `frontend/` paths described below are planned
 ### Data Flow
 
 ```
-SVG/DXF (grouped by stroke color) + YAML job
-    → io/: geometry per color group
+YAML job (geometry: path/to/file.svg) → io/: parse geometry, group by stroke color
     → core/: Tool, Setup, Operation
     → toolpath/: segments (rapid, linear, arc, drill point)
     → nc/: NCBlock IR (controller-neutral)
@@ -88,10 +87,10 @@ cargo build                          # Debug build
 cargo build --release                # Release build
 
 # CLI subcommands
-cargo run -- serve                   # Start web server (production)
-cargo run -- serve --dev --port 8000 # API only, CORS enabled (development)
-cargo run -- drill holes.dxf --postprocessor heidenhain --output DRILL.H
-cargo run -- drill --at 25,15 --at 75,15 --postprocessor heidenhain
+cargo run --bin chipmunk-server --features server                   # Start REST API server
+cargo run --bin chipmunk-server --features server -- --dev --port 8000 # CORS enabled (development)
+cargo run -- drill.yaml --output DRILL.H
+cargo run -- job.yaml --output part.H
 cargo run -- postprocessors          # List available post-processors
 
 # Rust tests
@@ -140,7 +139,7 @@ When implementing a feature, read the relevant design doc first. The docs are th
 - **Part update pipeline** (diff → registration → change report → operation audit → user review) ensures CAM operations are preserved when the CAD model changes. Never silently break a project.
 - **Post-processor plugin system** uses Lua config directory: built-ins embedded at compile time via `include_str!`; user post-processors are `.lua` files in the config directory discovered at startup.
 - **Face selection for orientation**: User clicks a face on the tessellated mesh → `face_ids[triangle_index]` maps to B-rep face → backend reads face normal, computes orientation transform. Z+ up, Z=0 at face surface.
-- **Implementation order**: CLI first. Phase 1 = scaffolding + import. Phase 2 = manual drill CLI + Heidenhain hardware test. Phase 3 = automatic drill cycles + per-tool export. Phase 4 = 2.5D milling (SVG color workflow + YAML job file). Frontend and 3D projects are deferred to backlog.
+- **Implementation order**: CLI first. Phase 1 = scaffolding + import. Phase 2 = manual drill (YAML, `strategy: manual`) + Heidenhain hardware test. Phase 3 = automatic drill cycles. Phase 4 = 2.5D milling (SVG color workflow, geometry embedded in YAML). No subcommands for NC generation — the binary takes a YAML file directly. Frontend and 3D projects are deferred to backlog.
 
 ## Discussion Documents
 

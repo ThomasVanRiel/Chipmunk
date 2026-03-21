@@ -2,13 +2,13 @@
 
 ## Overview
 
-CAMproject should be able to connect to external CAD systems to import geometry directly, rather than requiring manual file export/import. This is especially valuable for parametric workflows where the CAD model changes frequently — the CAM setup should update without re-importing files.
+Chipmunk should be able to connect to external CAD systems to import geometry directly, rather than requiring manual file export/import. This is especially valuable for parametric workflows where the CAD model changes frequently — the CAM setup should update without re-importing files.
 
 ## Integration Architecture
 
 ```
 ┌────────────────────┐     ┌──────────────────────┐
-│  External CAD      │     │     CAMproject        │
+│  External CAD      │     │     Chipmunk        │
 │  ┌──────────────┐  │     │  ┌────────────────┐   │
 │  │   Onshape    │──┼─API─┼─→│ integrations/  │   │
 │  │   FreeCAD    │──┼─────┼─→│   onshape.rs   │   │
@@ -105,11 +105,11 @@ Onshape provides REST endpoints for:
 ### Workflow
 
 1. User connects their Onshape account (OAuth2 flow or API key entry)
-2. User browses their Onshape documents in a dialog within CAMproject
-3. User selects a part → CAMproject fetches it as STEP (preferred) or STL
+2. User browses their Onshape documents in a dialog within Chipmunk
+3. User selects a part → Chipmunk fetches it as STEP (preferred) or STL
 4. The geometry is passed to `step_reader.rs` or `stl_reader.rs` → `TopoDS_Shape` → `PartGeometry`
 5. The `PartGeometry` stores the Onshape reference (document ID, part ID, version)
-6. On "refresh", CAMproject checks if the version has changed and re-imports if so
+6. On "refresh", Chipmunk checks if the version has changed and re-imports if so
 
 ### Implementation
 
@@ -203,7 +203,7 @@ impl CADIntegration for FreeCADIntegration {
 ### Workflow
 
 1. User opens a `.FCStd` file (or browses for one)
-2. CAMproject calls FreeCAD CLI to list bodies and export as STEP
+2. Chipmunk calls FreeCAD CLI to list bodies and export as STEP
 3. Geometry goes through `step_reader.rs` as usual
 
 ## Fusion 360 / SolidWorks (Future)
@@ -218,7 +218,7 @@ These are closed-source with limited API access:
 For CAD systems without API access, a simple "watch folder" integration:
 
 1. User configures a folder path
-2. CAMproject watches for new/modified STL/STEP/DXF files in the folder
+2. Chipmunk watches for new/modified STL/STEP/DXF files in the folder
 3. On change, the file is automatically re-imported
 4. Works with any CAD that can "save as" to a folder
 

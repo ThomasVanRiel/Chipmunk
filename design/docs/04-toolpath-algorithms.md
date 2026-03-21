@@ -317,7 +317,7 @@ Generates drilling cycles for point features (holes).
    - **Bore**: Feed to depth, optional dwell at bottom, feed retract
    - **Tap**: Feed to depth at pitch-synchronized feed, reverse retract
 
-**Dual output**: The toolpath generator always produces explicit moves (rapid/linear segments). When `use_canned_cycle == true`, the NC compiler additionally emits `CycleDefine` + `CycleCall` blocks. The post-processor chooses which form to output based on its `supported_cycles` set:
+**Dual output**: The toolpath generator always produces explicit moves (rapid/linear segments). When `use_canned_cycle == true` (the default), the NC compiler additionally emits `CycleDefine` + `CycleCall` blocks. The post-processor chooses which form to output based on its `supported_cycles` set — cycles are used when supported, explicit moves are the fallback:
 
 - **G-code controllers** (Fanuc, LinuxCNC, Haas): `G81`/`G83`/`G84`/`G85` with position-only lines, `G80` to cancel
 - **Heidenhain**: `CYCL DEF 200`/`203`/`207` with `M99` cycle call on position lines

@@ -20,13 +20,13 @@ CAMproject/
 │   ├── 08-integrations.md
 │   └── 09-part-update.md
 ├── src/
-│   ├── main.rs                     # Entry point: CLI subcommand dispatch (drill, mill, serve, postprocessors)
+│   ├── bin/
+│   │   ├── chipmunk.rs           # CLI entry point: positional YAML + override flags
+│   │   └── chipmunk_server.rs    # Server entry point (DEFERRED — see tasks/backlog.md)
 │   ├── lib.rs                      # Library root, module declarations
 │   ├── cli/
 │   │   ├── mod.rs                  # CLI module root
-│   │   ├── drill.rs                # `camproject drill` subcommand handler
-│   │   ├── mill.rs                 # `camproject mill` subcommand handler
-│   │   └── postprocessors.rs       # `camproject postprocessors` subcommand handler
+│   │   └── postprocessors.rs       # `chipmunk postprocessors` subcommand handler
 │   ├── api/                        # DEFERRED — add when REST API is implemented
 │   ├── core/
 │   │   ├── mod.rs
@@ -99,22 +99,34 @@ CAMproject/
 
 ```toml
 [package]
-name = "camproject"
+name = "chipmunk"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "CLI-first CAM tool for CNC milling NC code generation"
 authors = ["Thomas Van Riel"]
 
+[[bin]]
+name = "chipmunk"
+path = "src/bin/chipmunk.rs"
+
+[[bin]]
+name = "chipmunk-server"
+path = "src/bin/chipmunk_server.rs"
+required-features = ["server"]   # only built with --features server
+
+[features]
+server = ["axum", "tokio", "tower", "tower-http"]
+
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Web framework (deferred — add when REST API is implemented)
-# axum = { version = "0.8", features = ["ws", "multipart"] }
-# tokio = { version = "1", features = ["full"] }
-# tower = "0.5"
-# tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+# Web framework (server feature only — not linked into chipmunk CLI binary)
+axum = { version = "0.8", features = ["ws", "multipart"], optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"], optional = true }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -165,14 +177,14 @@ Testing post-processors during development: the `tests/test_postprocessors.rs` i
 cargo build                          # Debug build
 cargo build --release                # Release build
 
-# CLI subcommands
-cargo run -- drill holes.dxf --postprocessor heidenhain --output DRILL.H
-cargo run -- drill --at 25,15 --at 75,15 --postprocessor heidenhain
-cargo run -- mill part.svg --params job.yaml --output-dir ./nc/
-cargo run -- mill part.svg --params job.yaml --dry-run
+# CLI
+cargo run -- job.yaml --output part.H
+cargo run -- job.yaml --dry-run
 cargo run -- postprocessors          # List available post-processors
-cargo run -- serve                   # Start REST API server
-cargo run -- serve --dev --port 8000 # Development: CORS enabled
+
+# Server (deferred — requires --features server)
+cargo run --bin chipmunk-server --features server
+cargo run --bin chipmunk-server --features server -- --dev --port 8000
 
 # Tests
 cargo test                           # All Rust tests

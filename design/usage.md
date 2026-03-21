@@ -1,6 +1,6 @@
 # Usage
 
-CAMproject is a command-line CAM tool. You draw your part in Inkscape, assign stroke colors to indicate operations, write a YAML job file, and run one command to generate NC programs — one per tool.
+Chipmunk is a command-line CAM tool. You draw your part in Inkscape, assign stroke colors to indicate operations, write a YAML job file (which references the drawing), and run one command to generate NC output.
 
 ---
 
@@ -96,6 +96,7 @@ Any field defined directly on the operation overrides the library value. If the 
 Create **`clamp_jaw.yaml`** next to the SVG:
 
 ```yaml
+geometry: clamp_jaw.svg       # path relative to this file; list form also accepted
 postprocessor: heidenhain
 wcs: G54
 wcs_marker_color: "#aa00aa"   # circle of this color in the SVG = WCS origin
@@ -194,7 +195,7 @@ Post-processors that support constant surface speed natively (Sinumerik `G96`, H
 Always run with `--dry-run` first to verify the color grouping is correct:
 
 ```
-$ camproject mill clamp_jaw.svg --params clamp_jaw.yaml --dry-run
+$ chipmunk clamp_jaw.yaml --dry-run
 
 WCS origin (G54): circle at (0.000, 0.000) — color #aa00aa
 
@@ -202,10 +203,6 @@ Geometry groups found in clamp_jaw.svg:
   #0000ff   2 circles       → drill T1 (Drill 8.5mm)
   #ff8800   1 closed path   → pocket T2 (End Mill 8mm)
   #ff0000   1 closed path   → profile outside T2 (End Mill 8mm)
-
-Output files that would be written:
-  T1_DRILL_8.5MM.H     2 drill points
-  T2_END_MILL_8MM.H    pocket (1 path, 3 passes) + profile (1 path, 4 passes)
 ```
 
 If a color in the SVG has no matching entry in the YAML, it is listed as a warning:
@@ -218,12 +215,20 @@ Warning: SVG contains paths with color #888888 — no matching operation in job 
 
 ## Step 4 — Generate NC files
 
-```
-$ camproject mill clamp_jaw.svg --params clamp_jaw.yaml --output-dir ./nc/
+No tool changer — generate one file per tool using `--tool` to filter:
 
-Writing nc/T1_DRILL_8.5MM.H ...   done
-Writing nc/T2_END_MILL_8MM.H ...  done
 ```
+$ chipmunk clamp_jaw.yaml --tool 1 --output T1_DRILL_8.5MM.H
+$ chipmunk clamp_jaw.yaml --tool 2 --output T2_END_MILL_8MM.H
+```
+
+If your machine has a tool changer, omit `--tool` to get a single combined program:
+
+```
+$ chipmunk clamp_jaw.yaml --output clamp_jaw.H
+```
+
+Output goes to stdout if `--output` is not specified.
 
 ---
 
@@ -337,11 +342,8 @@ The stroke colors will print as-is, which can help distinguish operations. No sp
 Run the profile twice: once with allowance, once clean. Override the `allowance` field on the command line without modifying the YAML:
 
 ```bash
-camproject mill clamp_jaw.svg --params clamp_jaw.yaml \
-  --only-color "#ff0000" --allowance 0.3 --output nc/T2_PROFILE_ROUGH.H
-
-camproject mill clamp_jaw.svg --params clamp_jaw.yaml \
-  --only-color "#ff0000" --allowance 0.0 --output nc/T2_PROFILE_FINISH.H
+chipmunk clamp_jaw.yaml --color "#ff0000" --allowance 0.3 --output T2_PROFILE_ROUGH.H
+chipmunk clamp_jaw.yaml --color "#ff0000" --allowance 0.0 --output T2_PROFILE_FINISH.H
 ```
 
 ### Center drilling before through drilling
@@ -392,6 +394,7 @@ Use `strategy: manual` when the machine positions the tool and the operator dril
 
 Run the program in **single block mode** on the controller. The controller stops after each positioning move; the operator drills the hole, then presses cycle start to advance.
 
+Using color (circles extracted from geometry file):
 ```yaml
   - color: "#0000ff"
     type: drill
@@ -399,6 +402,19 @@ Run the program in **single block mode** on the controller. The controller stops
     tool_name: "Drill 8.5mm"
     tool_diameter: 8.5
     strategy: manual        # depth, feed, spindle_speed all ignored
+```
+
+Or with explicit coordinates (no geometry file needed for this operation):
+```yaml
+  - type: drill
+    tool_number: 1
+    tool_name: "Drill 8.5mm"
+    tool_diameter: 8.5
+    strategy: manual
+    points:
+      - [15.0, 20.0]
+      - [45.0, 20.0]
+      - [75.0, 20.0]
 ```
 
 Heidenhain output:
@@ -418,10 +434,39 @@ No `STOP` blocks, no `M3`/`M5`. The operator starts the spindle manually if need
 ### Listing available post-processors
 
 ```
-$ camproject postprocessors
+$ chipmunk postprocessors
 
 Name              Extension
 ────────────────  ─────────
 Heidenhain TNC    H
 Haas              nc
 ```
+
+---
+
+## Flag reference
+
+### `chipmunk job.yaml`
+
+The YAML file is the sole input. All operation parameters live in the YAML; flags are overrides only.
+
+| Flag | Argument | Description |
+|---|---|---|
+| `--geometry <file>` | SVG or DXF path | Override the `geometry:` field in the YAML |
+| `--postprocessor <name>` | e.g. `heidenhain` | Override the `postprocessor:` field in the YAML |
+| `--color <hex>` | e.g. `#ff0000` | Process only operations matching this stroke color |
+| `--tool <n>` | Integer | Output only operations for tool number N |
+| `--allowance <f>` | mm | Override `allowance:` on all matching operations |
+| `--dry-run` | — | Print color groups and matched operations; no NC generated |
+| `--output <path>` | File path | Write NC to file; omit to write to stdout |
+
+---
+
+### `chipmunk-server` (deferred)
+
+The REST API runs as a separate binary, not a subcommand of `chipmunk`.
+
+| Flag | Argument | Description |
+|---|---|---|
+| `--dev` | — | Enable CORS (for browser dev server proxying) |
+| `--port <n>` | Integer | Port to listen on (default: 8000) |

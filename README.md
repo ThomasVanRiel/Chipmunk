@@ -13,8 +13,23 @@ Currently supports **drilling and milling (2.5D)**. Turning is on the roadmap.
 Post-processors are Lua scripts — small, readable, and easy to extend. Heidenhain TNC is the primary built-in target; a Haas example post-processor is included to show how to add your own. If your machine speaks something else, writing a post-processor does not require touching the core.
 
 ```bash
-camproject drill holes.dxf --postprocessor heidenhain --output DRILL.H
-camproject mill part.svg --params job.yaml --output-dir ./nc/
+# Generate NC file directly
+chipmunk job.yaml --output part.H
+
+# Preview output without writing a file
+chipmunk job.yaml | less
+
+# Transfer directly to a network-connected machine over FTP
+chipmunk drill.yaml | ftp -u ftp://machine.local/programs/DRILL.H -
+
+# Send to a serial port (common for older Heidenhain controls)
+chipmunk job.yaml | socat - /dev/ttyUSB0,b9600,raw
+
+# Diff against a previous version before overwriting
+chipmunk job.yaml | diff previous/part.H -
+
+# Use a different post-processor for the same job
+chipmunk job.yaml --postprocessor haas | less
 ```
 
 ---
@@ -48,9 +63,10 @@ Chipmunk is none of those things.
 
 ## How it works
 
-You start from a drawing — a DXF from a customer, an export from your CAD tool, or something drawn in Inkscape. If you use SVG, assign stroke colors to group shapes by operation — any colors you like. Then write a short YAML file mapping each color to an operation and its parameters.
+You start from a drawing — a DXF from a customer, an export from your CAD tool, or something drawn in Inkscape. If you use SVG, assign stroke colors to group shapes by operation — any colors you like. Then write a short YAML file that references the drawing and maps each color to an operation and its parameters.
 
 ```yaml
+geometry: part.svg           # path to your drawing
 postprocessor: heidenhain
 clearance: 10.0              # Z height for rapids, relative to WCS zero
 
@@ -82,7 +98,7 @@ operations:
     compensation: cam        # cam = offset computed here; controller = emit RL/RR
 ```
 
-Run one command. Get one NC file per tool, ready to transfer to the machine.
+Run one command. Get NC output to stdout or `--output`, ready to transfer to the machine.
 
 The SVG also doubles as a shop drawing — print it at 1:1 scale and bring it to the machine as a setup reference.
 
@@ -98,7 +114,7 @@ Planned phases:
 
 1. **Scaffolding + import** — SVG/DXF parsing, color grouping, REST API skeleton
 2. **Manual drill** — rapid to XY positions, operator drills by hand in single block mode. First real hardware test.
-3. **Automatic drill cycles** — peck drilling, canned cycles (CYCL DEF 203), per-tool NC file export
+3. **Automatic drill cycles** — peck drilling, canned cycles (CYCL DEF 203), YAML-driven jobs
 4. **2.5D milling** — profiles, pockets, facing from SVG color workflow
 
 A browser frontend (geometry selection, toolpath preview) is planned but deferred — the CLI gets you a working tool first, and a visual interface will follow once the core is solid.
@@ -115,7 +131,7 @@ A browser frontend (geometry selection, toolpath preview) is planned but deferre
 
 **Post-processors are Lua scripts.** Small, readable, and easy to extend. The toolpath logic and the NC formatting are completely separate — adding support for a new controller means writing a Lua file, not modifying the core. Heidenhain TNC is the primary built-in; a Haas example is included as a starting point for other controllers.
 
-**CLI first.** The tool works entirely from the command line. A REST API exists as a peer interface for scripting and a future browser UI, but you never need it.
+**CLI first.** The tool works entirely from the command line — pass a YAML job file directly to the binary. A REST API exists as a peer interface for scripting and a future browser UI, but you never need it.
 
 ---
 

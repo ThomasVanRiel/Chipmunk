@@ -1,8 +1,8 @@
-# CAMproject — Architecture Overview
+# Chipmunk — Architecture Overview
 
 ## Purpose
 
-A CLI-first CAM (Computer-Aided Manufacturing) tool that generates NC code for CNC milling machines. SVG or DXF files are used as input, machining operations are defined via YAML job files, and the tool exports controller-agnostic NC code through pluggable post-processors.
+A CLI-first CAM (Computer-Aided Manufacturing) tool that generates NC code for CNC milling machines. Machining jobs are defined in YAML job files that reference SVG or DXF geometry; the tool exports controller-agnostic NC code through pluggable post-processors.
 
 The CLI is the primary and only interface for Phases 1–4. A REST API and browser frontend are deferred to the backlog — the architecture keeps them decoupled so they can be added later without refactoring.
 
@@ -11,9 +11,8 @@ The CLI is the primary and only interface for Phases 1–4. A REST API and brows
 ```
   ┌─────────────────────────────────┐
   │              CLI                │
-  │  camproject mill                │
-  │  camproject drill               │
-  │  camproject postprocessors      │
+  │  chipmunk [job.yaml]          │
+  │  chipmunk postprocessors      │
   └──────────────┬──────────────────┘
                  │  calls directly
                  ▼
@@ -44,7 +43,7 @@ The CLI calls library functions directly — no HTTP, no server process. When th
 ## Data Flow
 
 ```
-SVG/DXF + YAML job
+YAML job (geometry: path/to/file.svg)
         │
         ▼
   io/: parse geometry, group by stroke color
@@ -79,7 +78,7 @@ The CLI is the primary interface during active development — it gives direct h
 
 ### 3. SVG color workflow
 
-Operations are selected by SVG stroke color. Each color maps to a full operation configuration in the YAML job file. Circles → drill points or circular pockets. Closed paths → profile, pocket, or facing area. One SVG + one YAML → one or more NC files (split by tool).
+Operations are selected by SVG stroke color. Each color maps to a full operation configuration in the YAML job file, which also declares the geometry path (`geometry: part.svg`). Circles → drill points or circular pockets. Closed paths → profile, pocket, or facing area. One job YAML → NC output to stdout or `--output`.
 
 The WCS origin is defined by a marker circle drawn in the SVG at a dedicated color declared in the YAML (`wcs_marker_color`). The importer reads the circle's center as the WCS (0, 0) and excludes it from operation geometry. If `wcs_marker_color` is not set, the WCS origin falls at the SVG coordinate origin (bottom-left corner after Y-axis correction).
 

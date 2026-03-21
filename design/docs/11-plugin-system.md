@@ -1,6 +1,6 @@
 # Plugin System & Operation Type Registry
 
-CAMproject has one runtime plugin system (post-processors) and one compile-time type registry (toolpath operations):
+Chipmunk has one runtime plugin system (post-processors) and one compile-time type registry (toolpath operations):
 
 | Extension point | Language | Extensible at runtime? |
 |---|---|---|
@@ -35,8 +35,8 @@ They are part of the binary — no files needed at runtime.
 
 **User post-processors** are scanned at startup from:
 ```
-Linux/macOS:  ~/.config/camproject/postprocessors/
-Windows:      %APPDATA%\camproject\postprocessors\
+Linux/macOS:  ~/.config/chipmunk/postprocessors/
+Windows:      %APPDATA%\chipmunk\postprocessors\
 ```
 
 Any `.lua` file found there is registered. The filename (minus `.lua`) becomes the ID. A user file with the same ID as a built-in overrides the built-in — this is how users can patch a built-in without recompiling.
@@ -371,8 +371,8 @@ impl OperationType for DrillOperation {
     fn compile_nc(&self, op: &Operation, caps: &PostProcessorCapabilities)
         -> Option<Vec<NCBlock>>
     {
-        // Only emit cycle blocks if the user opted in AND the post-processor
-        // supports the relevant cycle type.
+        // Emit cycle blocks unless the user explicitly opted out (use_canned_cycle defaults to true).
+        // Post-processor capability is checked below; if unsupported, caller falls back to explicit moves.
         if !op.use_canned_cycle { return None; }
 
         let cycle_type = match op.drill_type {

@@ -360,8 +360,8 @@ pub const BUILTIN_POSTPROCESSORS: &[(&str, &str)] = &[
 
 **User-defined** (scanned at startup from config directory):
 ```
-~/.config/camproject/postprocessors/   (Linux/macOS)
-%APPDATA%\camproject\postprocessors\   (Windows)
+~/.config/chipmunk/postprocessors/   (Linux/macOS)
+%APPDATA%\chipmunk\postprocessors\   (Windows)
 ```
 
 Any `.lua` file in this directory is loaded and registered. The filename (minus extension) becomes the post-processor ID. User post-processors with the same ID as a built-in override the built-in.
@@ -371,7 +371,7 @@ Any `.lua` file in this directory is loaded and registered. The filename (minus 
 Create a `.lua` file and place it in the user postprocessors directory:
 
 ```lua
--- ~/.config/camproject/postprocessors/haas.lua
+-- ~/.config/chipmunk/postprocessors/haas.lua
 local base = require("base")
 local M = {}
 
@@ -618,7 +618,7 @@ strategy: manual
 
 ## Canned Cycles
 
-Canned cycles let the controller handle repetitive patterns internally. The IR supports them via `CycleDefine` / `CycleCall` / `CycleOff` blocks. Toolpath generators always produce explicit moves as fallback — canned cycles are an opt-in layer on top.
+Canned cycles let the controller handle repetitive patterns internally. The IR supports them via `CycleDefine` / `CycleCall` / `CycleOff` blocks. Toolpath generators always produce explicit moves as fallback. Canned cycles are **preferred by default** (`use_canned_cycle: true`) — they are emitted when the post-processor declares support, and the explicit moves serve as the fallback when it does not. Set `use_canned_cycle: false` on an operation to force explicit moves regardless of post-processor capability.
 
 Post-processors declare support via `supported_cycles`:
 

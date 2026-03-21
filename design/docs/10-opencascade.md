@@ -18,7 +18,7 @@ License: LGPL-2.1. FFI via cxx.rs — type-safe, no raw pointers in Rust code.
 
 ## OCCT API Usage by Module
 
-This section maps each CAMproject module to the specific OCCT classes it calls.
+This section maps each Chipmunk module to the specific OCCT classes it calls.
 
 ### `io/step_reader.rs` — STEP Import
 

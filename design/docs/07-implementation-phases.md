@@ -86,18 +86,27 @@ No STOP blocks, no spindle commands — the operator activates single block mode
 ### CLI
 
 ```bash
-# From SVG — extract circle centers from all circles
-camproject drill holes.svg --tool-number 1 --tool-name "Drill 6mm" --diameter 6 \
-  --spindle-speed 1500 --clearance 5 --postprocessor heidenhain --output DRILL.H
-
-# Filter by stroke color (for SVGs with mixed content)
-camproject drill part.svg --color "#00ff00" --tool-number 1 ...
-
-# Explicit coordinates
-camproject drill --at 25,15 --at 75,15 --at 75,65 --tool-number 1 ...
+chipmunk drill.yaml --output DRILL.H
 
 # List post-processors
-camproject postprocessors
+chipmunk postprocessors
+```
+
+Minimal `drill.yaml`:
+
+```yaml
+geometry: holes.svg
+postprocessor: heidenhain
+clearance: 5.0
+
+operations:
+  - color: "#0000ff"
+    type: drill
+    strategy: manual
+    tool_number: 1
+    tool_name: "Drill 6mm"
+    tool_diameter: 6.0
+    spindle_speed: 1500
 ```
 
 ### Tests
@@ -108,13 +117,13 @@ camproject postprocessors
 
 ### Deliverable
 
-`camproject drill holes.svg --postprocessor heidenhain --output DRILL.H` → load on Heidenhain TNC → quill drill workflow works.
+`chipmunk drill.yaml --output DRILL.H` → load on Heidenhain TNC → quill drill workflow works.
 
 ---
 
-## Phase 3: Automatic Drill Cycles + Per-Program Export
+## Phase 3: Automatic Drill Cycles
 
-**Goal**: Native canned cycles. Per-tool NC file export for no-tool-changer machines.
+**Goal**: Native canned cycles. YAML-driven drill jobs for no-tool-changer machines.
 
 ### No-Tool-Changer Workflow
 
@@ -141,24 +150,39 @@ Load Ø6 drill    → touch off Z at tip → run T2_DRILL_6.H
 ### CLI
 
 ```bash
-camproject drill holes.svg --params drill.yaml --output-dir ./nc/
-# → nc/T1_CENTER_DRILL.H, nc/T2_DRILL_6.H
+chipmunk drill.yaml --output DRILL.H
+# or: chipmunk drill.yaml > DRILL.H
+```
+
+`drill.yaml` includes the geometry path:
+
+```yaml
+geometry: holes.svg
+postprocessor: heidenhain
+# ... drill operations
+```
+
+For no-tool-changer machines, run once per tool using `--tool` to filter:
+
+```bash
+chipmunk drill.yaml --tool 1 --output T1_CENTER_DRILL.H
+chipmunk drill.yaml --tool 2 --output T2_DRILL_6.H
 ```
 
 ### Tests
 
 11. `test_drill_cycles.rs`, golden files for CYCL DEF 200/203, G83
-    Per-tool split test: two-tool job → two correct NC files
+    Multi-tool output test: two-tool job → combined NC file with correct tool changes
 
 ### Deliverable
 
-Two drill ops, different tools → `--output-dir nc/` → two `.H` files → load each in sequence, touching off Z at tip between tools.
+Two drill ops → single `.H` file (stdout or `--output`) → load on Heidenhain TNC → canned cycle drill workflow works.
 
 ---
 
 ## Phase 4: CLI 2.5D Milling — SVG Color Workflow
 
-**Goal**: Profile, pocket, facing driven by SVG stroke colors + YAML job file. One `camproject mill` command generates all NC programs for a job.
+**Goal**: Profile, pocket, facing driven by SVG stroke colors + YAML job file. One command generates NC output for the full job.
 
 ### SVG Color Workflow
 
@@ -166,6 +190,7 @@ Paths in the SVG are selected by **stroke color**. The YAML maps each color to a
 
 ```yaml
 # job.yaml
+geometry: part.svg          # path relative to this file; list form also accepted
 postprocessor: heidenhain
 clearance: 5.0
 
@@ -211,20 +236,24 @@ operations:
 ```
 
 ```bash
-camproject mill part.svg --params job.yaml --output-dir ./nc/
-# → nc/T1_CENTER_DRILL.H
-# → nc/T2_DRILL_6MM.H
-# → nc/T3_6MM_END_MILL.H   (profile + pocket combined, same tool)
+chipmunk job.yaml
+# → stdout: full NC program (all tools combined)
 
-camproject mill part.svg --params job.yaml --dry-run
+chipmunk job.yaml --output part.H
+# → part.H
+
+chipmunk job.yaml --dry-run
 # prints: 3 circles #00ff00 → drill T1
 #         2 circles #0000ff → drill T2
 #         1 path   #ff0000 → profile T3
 #         2 paths  #ff8800 → pocket T3
 
-# Roughing + finishing pass with same DXF, override allowance
-camproject mill part.svg --params job.yaml --color "#ff0000" --allowance 0.2 --output rough.H
-camproject mill part.svg --params job.yaml --color "#ff0000" --allowance 0.0 --output finish.H
+# Roughing + finishing pass, override allowance per run
+chipmunk job.yaml --color "#ff0000" --allowance 0.2 --output rough.H
+chipmunk job.yaml --color "#ff0000" --allowance 0.0 --output finish.H
+
+# Override geometry file (e.g. revised part revision)
+chipmunk job.yaml --geometry part_v2.svg --output part_v2.H
 ```
 
 ### Color convention (suggested, not enforced)
@@ -242,10 +271,11 @@ The mapping is entirely user-controlled via YAML — this is just a suggested st
 
 ### Backend Tasks
 
-1. **YAML job file** — `serde_yaml`, `JobParams` with top-level fields + `operations: Vec<OperationConfig>`
+1. **YAML job file** — `serde_yaml`, `JobParams` with `geometry:` path (or list), top-level fields, + `operations: Vec<OperationConfig>`
 2. **Color-keyed geometry grouping** — `io/svg_reader.rs` returns `Vec<ColorGroup { color: String, entities: Vec<Entity> }>`; DXF reader same
-3. **`camproject mill` subcommand** — parse SVG → group by color → match each group to `OperationConfig` → run operation → collect NCBlocks by tool → write per-tool files
-4. **`--dry-run` flag** — print color groups and matched operations, exit without generating NC
+3. **YAML handler** — load geometry from `job.yaml`, parse → group by color → match each group to `OperationConfig` → run operation → write NC to `--output` / stdout
+4. **`--geometry` override flag** — override the geometry path declared in the YAML (for revised parts without editing the job file)
+5. **`--dry-run` flag** — print color groups and matched operations, exit without generating NC
 5. **Polygon offset** — `toolpath/offset.rs`: `offset_polygon()`, `iterative_offset()`, contour extraction from color group
 6. **Depth strategy** — `toolpath/depth_strategy.rs`
 7. **Facing generator** — `toolpath/facing.rs`
@@ -260,15 +290,15 @@ The mapping is entirely user-controlled via YAML — this is just a suggested st
 13. `test_offset.rs`, `test_depth_strategy.rs`, `test_facing.rs`, `test_profile.rs`, `test_pocket.rs`
     `test_color_grouping.rs`: SVG with 3 colors → 3 groups with correct entities
     Golden files: `heidenhain_profile.H`, `heidenhain_pocket.H`, `heidenhain_facing.H`
-    CLI integration: `camproject mill fixture.svg --params fixture_job.yaml --dry-run` matches expected groups
+    CLI integration: `chipmunk fixture_job.yaml --dry-run` matches expected groups
 
 ### Deliverable
 
 ```bash
-camproject mill part.svg --params job.yaml --output-dir ./nc/
+chipmunk job.yaml --output part.H
 ```
 
-One command processes the full job: center drill, through drill, profile, pocket — each tool gets its own `.H` file. Draw in Inkscape, assign stroke colors, run command, machine the part.
+One command processes the full job: center drill, through drill, profile, pocket → single NC file to stdout or `--output`. Draw in Inkscape, assign stroke colors, run command, machine the part.
 
 ---
 
@@ -292,7 +322,7 @@ Items with clear design but no scheduled phase. Implement when the core CLI work
 - **REST API** — axum server exposing the same library functions over HTTP. Peer to the CLI, not a wrapper. Required before any frontend work. Design in `docs/02-api-design.md`.
 - **Browser frontend** — 2D canvas viewport, operation panels, NC preview. Design in `tasks/backlog.md`.
 - **3D projects** — STEP/STL import, B-rep slicer, Three.js viewport. Most milling is 2.5D; slicing is the same pipeline regardless of input.
-- **Inkscape extension** — appears under Extensions > CAM; calls `camproject` CLI; shows parameter dialog in Inkscape. Eliminates file management step.
+- **Inkscape extension** — appears under Extensions > CAM; calls `chipmunk` CLI; shows parameter dialog in Inkscape. Eliminates file management step.
 - **Sinumerik post-processor**
 - **Part update pipeline** — geometry diff, ICP registration, operation audit
 - **Stock simulation** — Z-buffer material removal

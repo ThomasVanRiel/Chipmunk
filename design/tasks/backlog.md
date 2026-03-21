@@ -25,7 +25,7 @@ Appears under **Extensions > CAM** in Inkscape. Eliminates the file-management s
 
 ### How Inkscape extensions work
 
-- Two files per extension: `camproject.inx` (XML descriptor) and `camproject.py` (Python handler)
+- Two files per extension: `chipmunk.inx` (XML descriptor) and `chipmunk.py` (Python handler)
 - Installed to `~/.config/inkscape/extensions/` (user) or system-wide
 - Inkscape passes the current SVG to the Python script; the script can show dialogs, read/write files, call external programs
 
@@ -33,24 +33,24 @@ Appears under **Extensions > CAM** in Inkscape. Eliminates the file-management s
 
 **Option A — Shell out to CLI** (simplest)
 - Extension dialog collects job params (or points to a `job.yaml`)
-- Extension writes a temp YAML, calls `camproject mill <temp.svg> --params <temp.yaml>`
+- Extension writes a temp YAML (with `geometry:` pointing to the SVG), calls `chipmunk <temp.yaml>`
 - Shows output path in a result dialog
 
 **Option B — Direct Python bindings** (tighter integration)
-- If camproject exposes a Python API (via PyO3), the extension calls it directly
+- If chipmunk exposes a Python API (via PyO3), the extension calls it directly
 - Avoids temp files; shows progress in Inkscape's status bar
 
 **Option C — Print/plot driver** (as Inkscape's print function)
-- Register camproject as a system "printer"
-- User does File > Print → selects "CAMproject" printer → NC file written
+- Register chipmunk as a system "printer"
+- User does File > Print → selects "Chipmunk" printer → NC file written
 - Inkscape passes PostScript/PDF; the driver converts to NC
 - Complex to set up (system-level driver); less control than options A/B
 - Worth investigating once the extension approach is working
 
 ### Tasks (when scheduled)
 
-- [ ] `inkscape-extension/camproject.inx` — XML descriptor (menu location, parameter inputs)
-- [ ] `inkscape-extension/camproject.py` — reads SVG from stdin, calls CLI or library, writes NC
+- [ ] `inkscape-extension/chipmunk.inx` — XML descriptor (menu location, parameter inputs)
+- [ ] `inkscape-extension/chipmunk.py` — reads SVG from stdin, calls CLI or library, writes NC
 - [ ] Dialog: job YAML path or inline params (tool number, diameter, postprocessor, output dir)
 - [ ] Install script / packaging
 
@@ -63,7 +63,7 @@ Most milling is 2.5D — the toolpath pipeline is identical regardless of whethe
 - **STEP/STL import** via OpenCascade (`STEPControl_Reader`, `BRepBuilderAPI_Sewing`)
 - **B-rep slicer** (`toolpath/slicer.rs`): `BRepAlgoAPI_Section(shape, plane_at_z)` → `geo::MultiPolygon`; same polygon offset pipeline used from there
 - **Face orientation**: click a face to set Z-up; backend reads face normal from B-rep
-- **CLI**: `camproject mill part.step --slice-z 0 --params job.yaml` — slice at Z, then same color/op pipeline but with DXF-less geometry selection (face IDs or auto-detect all planar faces)
+- **CLI**: `chipmunk job.yaml --geometry part.step --slice-z 0` — slice at Z, then same color/op pipeline but with DXF-less geometry selection (face IDs or auto-detect all planar faces)
 - **Three.js viewport** (frontend): tessellated mesh + `face_ids` + `TessellatedEdge` list; orbit camera; face/edge pick
 
 Note on rotary axis: a rotary 4th axis keeps the workflow 2.5D (each angular position is a 2.5D setup). The user handles WCS selection manually — no special support needed.
@@ -94,7 +94,7 @@ For when the source drawing changes and existing operations need to be re-valida
 ## Stock Simulation
 
 - Z-buffer material removal (dexel or height-map)
-- CLI: `camproject simulate part.svg --params job.yaml` → renders a 2D material-remaining map (SVG or PNG output)
+- CLI: `chipmunk simulate job.yaml` → renders a 2D material-remaining map (SVG or PNG output)
 - No full 3D simulation needed for 2.5D work — a top-down depth map is sufficient
 
 ---
@@ -103,7 +103,7 @@ For when the source drawing changes and existing operations need to be re-valida
 
 Axum HTTP server exposing the same core library functions used by the CLI. Required before any frontend work. The CLI and API are peers — neither wraps the other.
 
-Key design: `camproject serve` starts the server. All endpoints call library functions directly, no HTTP to self.
+Key design: `chipmunk-server` is a separate binary (built with `--features server`). All endpoints call library functions directly, no HTTP to self. The CLI binary has no dependency on axum or tokio.
 
 Endpoints defined in `docs/02-api-design.md`. Implement when a frontend or remote access is needed.
 
@@ -114,7 +114,7 @@ Tasks (when scheduled):
 - [ ] `GET /api/health`, `GET /api/postprocessors`
 - [ ] Project CRUD: `GET/POST /api/project`, parts upload, export endpoints
 - [ ] Tools, setups, operations CRUD
-- [ ] `camproject serve` subcommand in `src/cli/`
+- [ ] `src/bin/chipmunk_server.rs` — server entry point with `--dev` and `--port` flags
 
 ---
 

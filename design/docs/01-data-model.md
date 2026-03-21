@@ -458,8 +458,11 @@ pub struct Operation {
     pub pocket_strategy: Option<String>,          // "contour_parallel" or "zigzag"
     pub pocket_entry: Option<String>,             // "plunge" (default), "helix", or "ramp"
 
+    // Drill — explicit points (alternative to geometry_id; mutually exclusive with color-based geometry)
+    pub drill_points: Option<Vec<Point2>>,   // If set, these XY positions are used directly; geometry_id is ignored
+
     // Canned cycles (future — see 03-nc-and-postprocessors.md)
-    pub use_canned_cycle: bool,    // Default: false. Emit cycle blocks if post-processor supports it.
+    pub use_canned_cycle: bool,    // Default: true. When true, emit cycle blocks if post-processor supports them; fall back to explicit moves otherwise. Set false to force explicit moves regardless of post-processor capability.
 
     // Computed output
     #[serde(skip)]
@@ -468,6 +471,31 @@ pub struct Operation {
 ```
 
 **Alternative considered**: Using separate structs per operation type (FacingOperation, ProfileOperation, etc.) or a Rust enum with per-variant data. Decided on a single struct because it simplifies serialization, API contracts, and the operations panel UI. Type-specific fields are simply `None` when not applicable.
+
+### Drill Geometry Source
+
+Drill operations support two mutually exclusive ways to specify hole positions:
+
+- **`color:` (default)** — circles of the given stroke color in the geometry file are extracted as drill points. Suitable for any job that has a geometry file with color-coded hole positions.
+- **`points:`** — explicit XY coordinates listed directly in the YAML. No geometry file needed for this operation (though `geometry:` may still be present for other operations in the same job). Suitable for known fixed positions or jobs with no drawing.
+
+In the YAML job file these appear as:
+```yaml
+# Color-based — circles of this color in the SVG become drill points
+- color: "#0000ff"
+  type: drill
+  ...
+
+# Explicit points — no color matching, positions defined inline
+- type: drill
+  points:
+    - [25.0, 15.0]
+    - [75.0, 15.0]
+    - [75.0, 65.0]
+  ...
+```
+
+If both `color:` and `points:` are specified on the same operation: hard error. If neither is specified for a drill operation: hard error.
 
 ### Cutter Compensation: CAM vs Controller
 
