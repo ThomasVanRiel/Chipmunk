@@ -9,6 +9,12 @@ CAMproject is a browser-based CAM (Computer-Aided Manufacturing) tool for genera
 - **License**: MIT
 - **Remote**: `git@github.com:ThomasVanRiel/CAMproject.git`
 
+## Implementation Status
+
+**Pre-implementation** — only design documentation exists. No source code has been written yet. Phase 1 (backend scaffolding + 2.5D geometry display) is the starting point. See `docs/07-implementation-phases.md` for the full phased breakdown.
+
+All `src/`, `postprocessors/`, and `frontend/` paths described below are planned structure, not yet on disk.
+
 ## Architecture
 
 **Backend**: Rust (axum) — handles geometry processing, toolpath generation, NC IR compilation, API serving.
@@ -107,6 +113,7 @@ Detailed design docs live in `docs/`:
 | `07-implementation-phases.md` | Phased task breakdown with deliverables |
 | `08-integrations.md` | CAD integrations: Onshape API, FreeCAD, watch folder |
 | `09-part-update.md` | Geometry change handling: diff, alignment, operation audit |
+| `10-opencascade.md` | OCCT API usage by module, custom cxx.rs bindings, thread safety, error handling |
 
 When implementing a feature, read the relevant design doc first. The docs are the source of truth for architectural decisions.
 
