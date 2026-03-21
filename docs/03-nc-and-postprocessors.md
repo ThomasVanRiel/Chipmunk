@@ -411,39 +411,22 @@ No installation required. Restart the server and the post-processor appears in t
 
 ### Built-in Post-Processors
 
-#### LinuxCNC (`.ngc`)
-- Line numbers: `N0010`, `N0020`, ...
-- Trailing decimal points: `X10.000`
-- Percent signs wrapping program
-- `M30` for program end
-- Full canned cycle set
+Two post-processors are built in. Others can be added by placing a `.lua` file in the config directory.
 
-#### Grbl (`.gcode`)
-- No line numbers (saves serial bandwidth)
-- No percent signs
-- `M2` for program end
-- No canned cycles — drill cycles expanded to explicit moves
-- Single-level block delete only
+#### Haas (`.nc`)
 
-#### Generic Fanuc (`.nc`)
+The Haas post-processor is the built-in G-code example and serves as a starting point for other G-code controllers (Fanuc, LinuxCNC, Grbl, Sinumerik, etc.).
+
+Key characteristics:
+- `O0001` program number header
 - Line numbers: `N1`, `N2`, ...
-- `O0001` program number in header
 - Trailing decimal points: `X10.`
-- `M30` with rewind
-- Standard Fanuc modal groups
-
-#### Marlin (`.gcode`)
-- No line numbers
-- For CNC-adapted 3D printers
-- `M3`/`M5` for spindle (or laser)
-- `G28` homing in preamble
-
-#### Sinumerik (`.mpf`)
-- Line numbers: `N10`, `N20`, ...
-- Block delete: `/1` through `/8`
-- Variables: `R1`–`R999`
-- Conditional jumps: `IF condition GOTOF label`
-- `M30` program end
+- `T1 M6` tool change
+- `G90` absolute mode guard in preamble
+- `M30` with rewind for program end
+- G81 (simple drill), G83 (peck, Q = peck depth), G84 (tap)
+- `G80` after `CycleOff`
+- Block delete: `/` prefix for optional blocks
 
 #### Heidenhain TNC (`.h`)
 
@@ -566,7 +549,7 @@ Output for a peck drill at three points, depth 25mm, peck 5mm:
 45 L X+50.000 Y+10.000 FMAX M99
 ```
 
-If the user targets Grbl instead (no cycle support), `DrillOperation::compile_nc` returns `None`, the compiler falls back to `compile_toolpath_generic`, and the post-processor receives ordinary `Rapid`/`Linear` blocks — no cycle handling needed in the Grbl post-processor at all.
+If the target post-processor declares no cycle support, `DrillOperation::compile_nc` returns `None`, the compiler falls back to `compile_toolpath_generic`, and the post-processor receives ordinary `Rapid`/`Linear` blocks — no cycle handling needed.
 
 **Example output** (facing operation):
 ```

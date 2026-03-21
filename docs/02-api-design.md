@@ -397,14 +397,12 @@ Each segment specifies a destination point. The `start_position` field gives the
 ```json
 // Response 200
 [
-  { "id": "linuxcnc", "name": "LinuxCNC", "file_extension": ".ngc" },
-  { "id": "grbl", "name": "Grbl", "file_extension": ".gcode" },
-  { "id": "marlin", "name": "Marlin", "file_extension": ".gcode" },
-  { "id": "fanuc", "name": "Generic Fanuc", "file_extension": ".nc" },
-  { "id": "sinumerik", "name": "Sinumerik", "file_extension": ".mpf" },
-  { "id": "heidenhain", "name": "Heidenhain TNC", "file_extension": ".h" }
+  { "id": "heidenhain", "name": "Heidenhain TNC", "file_extension": ".h" },
+  { "id": "haas",       "name": "Haas",            "file_extension": ".nc" }
 ]
 ```
+
+Built-in post-processors are Heidenhain TNC (primary) and Haas (G-code example). User post-processors placed in the config directory appear in this list automatically.
 
 #### `POST /api/project/export/preview`
 ```json

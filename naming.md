@@ -1,6 +1,6 @@
 # Name Proposals
 
-**Current working title**: `CAMproject`
+**Current working title**: `Chipmunk` (was `CAMproject`)
 
 ---
 
@@ -75,5 +75,5 @@
 ## Notes
 
 - Check crates.io and GitHub for name conflicts before committing.
-- The binary name and the crate name can differ if needed (`camproject` crate, `swarf` binary).
-- No final decision yet — `CAMproject` remains the working title.
+- The binary name and the crate name can differ if needed (`chipmunk` crate, `chipmunk` binary — or a different name from the shortlist).
+- No final decision yet — `Chipmunk` is the working title.

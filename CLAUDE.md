@@ -9,6 +9,16 @@ CAMproject is a CLI-first CAM (Computer-Aided Manufacturing) tool for generating
 - **License**: MIT
 - **Remote**: `git@github.com:ThomasVanRiel/CAMproject.git`
 
+## Ground Rules for Claude
+
+**Do not write or modify source code unless explicitly asked.**
+
+Claude is a useful assistant for research, documentation, planning, and answering questions about the codebase. The source code is human-authored by design. Helping with docs, auditing for inconsistencies, drafting phase plans, or explaining design decisions is welcome. Opening a `.rs`, `.lua`, or `.toml` source file and editing it is not — unless the user has explicitly asked for that specific change.
+
+When in doubt: document, don't code.
+
+---
+
 ## Implementation Status
 
 **Pre-implementation** — only design documentation exists. No source code has been written yet. Phase 1 (backend scaffolding + SVG/DXF import) is the starting point. See `docs/07-implementation-phases.md` for the full phased breakdown.
