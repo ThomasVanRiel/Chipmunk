@@ -3,7 +3,7 @@
 ## Directory Layout
 
 ```
-CAMproject/
+chipmunk/
 ├── LICENSE                         # MIT License
 ├── CLAUDE.md                       # Claude Code guidance
 ├── Cargo.toml                      # Rust workspace root

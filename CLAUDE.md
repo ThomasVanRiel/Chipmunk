@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Chipmunk is a CLI-first CAM (Computer-Aided Manufacturing) tool for generating NC code for CNC milling machines. Machining jobs are defined in YAML job files that reference SVG or DXF geometry; NC code is exported through pluggable Lua post-processors. A REST API exists as a peer interface for future use (frontend, remote access) but the CLI is the primary interface.
 
 - **License**: MIT
-- **Remote**: `git@github.com:ThomasVanRiel/Chipmunk.git`
+- **Remote**: `git@github.com:ThomasVanRiel/chipmunk.git`
 
 ## Ground Rules for Claude
 
@@ -21,17 +21,17 @@ When in doubt: document, don't code.
 
 ## Implementation Status
 
-**Pre-implementation** — only design documentation exists. No source code has been written yet. Phase 1 (backend scaffolding + SVG/DXF import) is the starting point. See `docs/07-implementation-phases.md` for the full phased breakdown.
+**Pre-implementation** — only design documentation exists. No source code has been written yet. Phase 1 (backend scaffolding + SVG/DXF import) is the starting point. See `design/docs/07-implementation-phases.md` for the full phased breakdown.
 
 All `src/`, `postprocessors/`, and `frontend/` paths described below are planned structure, not yet on disk.
 
 ## Architecture
 
 **CLI**: Primary interface — `chipmunk job.yaml`, `chipmunk postprocessors`. The YAML file is the sole input for NC generation. Calls the core library directly; no HTTP overhead.
-**API**: Deferred. Will be a peer interface (axum) over the same library functions — not a wrapper around the CLI. Needed before any frontend work. See `tasks/backlog.md`.
+**API**: Deferred. Will be a peer interface (axum) over the same library functions — not a wrapper around the CLI. Needed before any frontend work. See `design/tasks/backlog.md`.
 **Geometry kernel**: OpenCascade (via opencascade-rs) — B-rep for exact curves; SVG and DXF import.
 **Post-processors**: Lua (via mlua) — pluggable NC code formatters. ~300KB VM embedded at compile time. Built-ins via `include_str!`; user post-processors are `.lua` files in the config directory.
-**Frontend**: Deferred. See `tasks/backlog.md`.
+**Frontend**: Deferred. See `design/tasks/backlog.md`.
 
 ### Data Flow
 
@@ -104,7 +104,7 @@ cargo fmt                            # Format
 
 ## Design Documents
 
-Detailed design docs live in `docs/`:
+Detailed design docs live in `design/docs/`:
 
 | Doc | Contents |
 |-----|----------|
@@ -143,7 +143,7 @@ When implementing a feature, read the relevant design doc first. The docs are th
 
 ## Discussion Documents
 
-Design discussions and decision records live in `discussions/`:
+Design discussions and decision records live in `design/discussions/`:
 
 | Doc | Contents |
 |-----|----------|
