@@ -338,8 +338,5 @@ $ camproject postprocessors
 Name              Extension
 ────────────────  ─────────
 Heidenhain TNC    H
-LinuxCNC          ngc
-Grbl              gcode
-Marlin            gcode
-Generic Fanuc     nc
+Haas              nc
 ```

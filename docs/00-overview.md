@@ -108,7 +108,7 @@ Toolpaths are generated as abstract segment sequences (rapid, linear, arc). Thes
 
 ### 5. No-tool-changer workflow
 
-Z=0 is set at the tool tip before each program run — no tool length measurement or compensation needed. Operations are grouped by tool and exported as separate NC files. Each file is self-contained: spindle on, moves, spindle off.
+Z=0 is defined in WCS — which commonly coincides with the tool tip but does not have to. Tool length compensation is supported but not required. Operations can be combined in one program or split into one file per tool; per-tool export works well when loading tools manually without an ATC.
 
 ### 6. Trust the operator
 

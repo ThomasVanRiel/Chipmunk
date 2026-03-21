@@ -76,12 +76,8 @@ CAMproject/
 │       └── math.rs                 # Arc fitting, geometric helpers
 ├── postprocessors/                 # Lua post-processors (embedded at compile time)
 │   ├── base.lua                    # Shared helpers (coord formatting, number formatting)
-│   ├── linuxcnc.lua                # LinuxCNC post-processor
-│   ├── grbl.lua                    # Grbl post-processor
-│   ├── marlin.lua                  # Marlin post-processor
-│   ├── fanuc.lua                   # Generic Fanuc post-processor
-│   ├── sinumerik.lua               # Siemens Sinumerik
-│   └── heidenhain.lua              # Heidenhain TNC conversational
+│   ├── heidenhain.lua              # Heidenhain TNC conversational (primary)
+│   └── haas.lua                    # Haas (G-code example — starting point for other controllers)
 ├── frontend/                       # DEFERRED — not built yet (see tasks/backlog.md)
 └── tests/
     ├── common/
@@ -161,12 +157,8 @@ The `postprocessors/` directory contains the Lua source files embedded into the 
 ```
 postprocessors/
 ├── base.lua         # Shared helpers: coord/number formatting, modal state tracking
-├── linuxcnc.lua
-├── grbl.lua
-├── marlin.lua
-├── fanuc.lua
-├── sinumerik.lua
-└── heidenhain.lua
+├── heidenhain.lua   # Primary built-in
+└── haas.lua         # Example G-code post-processor (starting point for other controllers)
 ```
 
 Testing post-processors during development: the `tests/test_postprocessors.rs` integration test loads each Lua file via `mlua` and runs it against a fixed `Vec<NCBlock>` fixture, comparing the output against a golden file in `tests/fixtures/nc/`.

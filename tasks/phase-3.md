@@ -56,17 +56,17 @@ This means:
 - [ ] Add `"cycl_def_200"`, `"cycl_def_203"`, `"cycl_def_207"` to `M.supported_cycles`
 
 ### G-code canned cycles (Lua)
-- [ ] `postprocessors/linuxcnc.lua` — G81 (simple), G83 (peck, Q = peck depth), G84 (tap, F = pitch × RPM)
+- [ ] `postprocessors/haas.lua` — G81 (simple), G83 (peck, Q = peck depth), G84 (tap, F = pitch × RPM)
   - Emit `G80` after `CycleOff`
   - R-plane from `retract_plane` param
-- [ ] `postprocessors/fanuc.lua` — same with `G90` absolute mode guard
+  - `G90` absolute mode guard
 
 ### Optional operations (M1 stop)
 - [ ] `core/operation.rs` — `optional_skip_level: Option<u8>` (1–9) on `Operation`
 - [ ] `nc/ir.rs` — `OptionalBlock { level: u8, blocks: Vec<NCBlock> }` wrapper
 - [ ] NC compiler: wrap optional operation blocks in `OptionalBlock`
 - [ ] `postprocessors/heidenhain.lua` — `OptionalBlock`: emit `M1` before block
-- [ ] `postprocessors/linuxcnc.lua` — `OptionalBlock`: prefix lines with `/`
+- [ ] `postprocessors/haas.lua` — `OptionalBlock`: prefix lines with `/`
 
 ### Per-program export
 - [ ] `POST /api/project/export/preview` — extend body with `{ operation_ids?: [uuid] }` filter
@@ -94,9 +94,9 @@ This means:
 - [ ] Golden files:
   - `tests/fixtures/nc/heidenhain_cycl200.H` — CYCL DEF 200, three holes, Z-zero-at-tip mode
   - `tests/fixtures/nc/heidenhain_cycl203.H` — CYCL DEF 203 peck
-  - `tests/fixtures/nc/linuxcnc_g83.nc` — G83 peck
+  - `tests/fixtures/nc/haas_g83.nc` — G83 peck
 - [ ] Per-program export test: project with two tools → `export/by-tool` → two NC files with correct operation subsets
-- [ ] Optional operation test: `optional_skip_level: 1` → Heidenhain emits `M1`, LinuxCNC prefixes `/`
+- [ ] Optional operation test: `optional_skip_level: 1` → Heidenhain emits `M1`, Haas prefixes `/`
 
 ---
 

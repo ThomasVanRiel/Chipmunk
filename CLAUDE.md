@@ -56,7 +56,7 @@ Key principle: `core/`, `toolpath/`, `nc/`, `io/` have **zero framework dependen
 2. **NCBlock IR** — controller-neutral program (adds spindle, tools, coolant, compensation, cycles, optional skips)
 3. **Post-processor** — formats to machine-specific output (G-code, Heidenhain conversational, Sinumerik)
 
-Post-processors are Lua modules (~300KB VM) embedded at compile time via `include_str!()`. A fresh Lua VM is created per NC generation call. Built-in post-processors: LinuxCNC, Grbl, Marlin, Generic Fanuc, Sinumerik, Heidenhain TNC. User post-processors are `.lua` files in the config directory, discovered at startup.
+Post-processors are Lua modules (~300KB VM) embedded at compile time via `include_str!()`. A fresh Lua VM is created per NC generation call. Built-in post-processors: Heidenhain TNC (primary), Haas (example). User post-processors are `.lua` files in the config directory, discovered at startup.
 
 ### Cutter Compensation
 
