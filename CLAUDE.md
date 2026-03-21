@@ -110,16 +110,21 @@ Detailed design docs live in `design/docs/`:
 |-----|----------|
 | `00-overview.md` | Architecture, tech choices, design principles |
 | `01-data-model.md` | Core types: Project, PartGeometry, Tool, Operation, Toolpath |
-| `02-api-design.md` | REST API + WebSocket spec **(DEFERRED — see tasks/backlog.md)** |
 | `03-nc-and-postprocessors.md` | NCBlock IR (Rust), mlua bridge, Lua post-processor API, drill strategies, canned cycles, optional operations |
 | `04-toolpath-algorithms.md` | Slicing, offset, facing, profile, pocket, drill algorithms |
-| `05-frontend-design.md` | Three.js viewport, UI layout, panels, Vite build **(DEFERRED — see tasks/backlog.md)** |
 | `06-project-structure.md` | Directory tree, Cargo.toml, dependency rules |
 | `07-implementation-phases.md` | Phased task breakdown with deliverables |
+| `11-plugin-system.md` | Post-processor Lua plugin mechanics (registry, mlua bridge, testing); toolpath operation Rust trait system |
+
+Deferred docs (not needed for Phases 1–4) live in `design/docs/deferred/`:
+
+| Doc | Contents |
+|-----|----------|
+| `02-api-design.md` | REST API + WebSocket spec |
+| `05-frontend-design.md` | Three.js viewport, UI layout, panels, Vite build |
 | `08-integrations.md` | CAD integrations: Onshape API, FreeCAD, watch folder |
 | `09-part-update.md` | Geometry change handling: diff, alignment, operation audit |
 | `10-opencascade.md` | OCCT API usage by module, custom cxx.rs bindings, thread safety, error handling |
-| `11-plugin-system.md` | Post-processor Lua plugin mechanics (registry, mlua bridge, testing); toolpath operation Rust trait system |
 
 When implementing a feature, read the relevant design doc first. The docs are the source of truth for architectural decisions.
 

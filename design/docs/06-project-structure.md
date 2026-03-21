@@ -11,14 +11,17 @@ chipmunk/
 ├── docs/                           # Design documentation (these files)
 │   ├── 00-overview.md
 │   ├── 01-data-model.md
-│   ├── 02-api-design.md
 │   ├── 03-nc-and-postprocessors.md
 │   ├── 04-toolpath-algorithms.md
-│   ├── 05-frontend-design.md
 │   ├── 06-project-structure.md
 │   ├── 07-implementation-phases.md
-│   ├── 08-integrations.md
-│   └── 09-part-update.md
+│   ├── 11-plugin-system.md
+│   └── deferred/                   # Backlog — not needed for Phases 1–4
+│       ├── 02-api-design.md
+│       ├── 05-frontend-design.md
+│       ├── 08-integrations.md
+│       ├── 09-part-update.md
+│       └── 10-opencascade.md
 ├── src/
 │   ├── bin/
 │   │   ├── chipmunk.rs           # CLI entry point: positional YAML + override flags
@@ -179,7 +182,7 @@ cargo build --release                # Release build
 
 # CLI
 cargo run -- job.yaml --output part.H
-cargo run -- job.yaml --dry-run
+cargo run -- job.yaml --check
 cargo run -- postprocessors          # List available post-processors
 
 # Server (deferred — requires --features server)

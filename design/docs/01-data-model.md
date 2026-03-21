@@ -145,10 +145,10 @@ pub struct PartGeometry {
     // Transform applied to the imported geometry
     pub transform: [[f64; 4]; 4],          // 4x4 homogeneous transform matrix
 
-    // Provenance — where the geometry came from (see 08-integrations.md)
+    // Provenance — where the geometry came from (see deferred/08-integrations.md)
     pub provenance: Option<PartProvenance>,
 
-    // Update history — tracks geometry changes over time (see 09-part-update.md)
+    // Update history — tracks geometry changes over time (see deferred/09-part-update.md)
     pub update_history: Vec<PartUpdate>,
 }
 

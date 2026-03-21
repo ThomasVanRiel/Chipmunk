@@ -5,6 +5,7 @@ project:
 book:
   title: "Chipmunk Design"
   author: "Thomas Van Riel"
+  output-file: "Chipmunk-Design"
   chapters:
     - index.md
     - part: "Overview"
@@ -14,15 +15,10 @@ book:
       chapters:
         - docs/00-overview.md
         - docs/01-data-model.md
-        - docs/02-api-design.md
         - docs/03-nc-and-postprocessors.md
         - docs/04-toolpath-algorithms.md
-        - docs/05-frontend-design.md
         - docs/06-project-structure.md
         - docs/07-implementation-phases.md
-        - docs/08-integrations.md
-        - docs/09-part-update.md
-        - docs/10-opencascade.md
         - docs/11-plugin-system.md
     - part: "Tasks"
       chapters:
@@ -35,9 +31,15 @@ book:
         - discussions/brep-geometry.md
         - discussions/opencascade-bindings.md
         - discussions/deferred-ideas.md
+    - part: "Backlog"
+      chapters:
+        - docs/deferred/02-api-design.md
+        - docs/deferred/05-frontend-design.md
+        - docs/deferred/08-integrations.md
+        - docs/deferred/09-part-update.md
+        - docs/deferred/10-opencascade.md
 
 format:
   pdf:
-    output-file: "Chipmunk-Design.pdf"
     toc: true
     number-sections: true

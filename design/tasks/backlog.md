@@ -15,7 +15,7 @@ Full web UI for users who prefer not to use the CLI or Inkscape.
 - WebSocket progress bar during toolpath generation
 - Undo/redo
 
-Most of the value of a frontend is **geometry selection** (clicking which contour to use) and **toolpath visualization** (verifying before cutting). Both are solved differently by the SVG color workflow — the colors in Inkscape serve as the selection mechanism, and `--dry-run` gives a text summary. The frontend is still useful but not blocking.
+Most of the value of a frontend is **geometry selection** (clicking which contour to use) and **toolpath visualization** (verifying before cutting). Both are solved differently by the SVG color workflow — the colors in Inkscape serve as the selection mechanism, and `--check` gives a text summary. The frontend is still useful but not blocking.
 
 ---
 
@@ -82,7 +82,7 @@ Note on rotary axis: a rotary 4th axis keeps the workflow 2.5D (each angular pos
 
 ## Part Update Pipeline
 
-For when the source drawing changes and existing operations need to be re-validated. See `docs/09-part-update.md`.
+For when the source drawing changes and existing operations need to be re-validated. See `design/docs/deferred/09-part-update.md`.
 
 - Geometry diff: detect added/removed/modified contours
 - ICP registration (Besl & McKay 1992): realign if origin shifted
@@ -105,7 +105,7 @@ Axum HTTP server exposing the same core library functions used by the CLI. Requi
 
 Key design: `chipmunk-server` is a separate binary (built with `--features server`). All endpoints call library functions directly, no HTTP to self. The CLI binary has no dependency on axum or tokio.
 
-Endpoints defined in `docs/02-api-design.md`. Implement when a frontend or remote access is needed.
+Endpoints defined in `design/docs/deferred/02-api-design.md`. Implement when a frontend or remote access is needed.
 
 Tasks (when scheduled):
 - [ ] Add axum, tokio, tower, tower-http to `Cargo.toml`
@@ -139,6 +139,38 @@ Lathe toolpaths are structurally different from milling — the part rotates, th
 - **Live tooling**: optional — cross-drilling, milling on a turning centre
 
 The Haas example post-processor is a natural starting point since the Haas TL-series lathes use near-standard G-code.
+
+---
+
+## Wire EDM
+
+Wire EDM is structurally different from milling. The machine handles its own CAM (cut conditions, wire speed, flushing, multi-pass finishing) — Chipmunk's job is to export the **contour geometry as G-code**, which the machine imports and uses as the basis for its own programming.
+
+### Output format
+
+Standard-ish G-code contour: `G00`/`G01`/`G02`/`G03` moves in XY. No tool compensation, no cutting parameters — those live on the machine. Exact arcs from the B-rep should be preserved as `G02`/`G03` rather than linearised, since wire EDM tolerances are tight and arc approximation introduces error.
+
+### Tapered cuts (4-axis)
+
+4-axis wire EDM moves the upper and lower wire guides independently (XY for one guide, UV for the other), allowing tapered walls or transition cuts where the top and bottom profiles differ. Two modes:
+
+- **Constant taper** — single contour + taper angle. The machine offsets the UV path automatically. Simple to program; Chipmunk emits the XY contour and a taper angle parameter.
+- **Two-profile** — upper and lower contours differ (e.g. square at bottom, circle at top). Output is `XYUV` G-code: XY drives the lower guide, UV drives the upper guide simultaneously. Requires two separate contour paths in the YAML, one per guide. The machine interpolates between them. More complex; needs a way to associate the two contours in the job file.
+
+Both modes are worth supporting. The SVG color convention maps cleanly: one color = lower contour, a second paired color = upper contour (or the same color with a `taper_angle` field for the simple case).
+
+### Entry holes
+
+Internal features (pockets, slots) require the wire to be threaded through a pre-drilled entry hole before the cut starts. The G-code contour must begin at the entry hole position, not on the contour itself. The YAML should be able to specify entry hole position per contour (or let the operator mark it in the SVG as a separate point geometry).
+
+### Tasks (when scheduled)
+
+- [ ] Wire EDM operation type: `type: wedm_contour`
+- [ ] `taper_angle` field (constant taper, single contour)
+- [ ] `upper_color` / `lower_color` pairing for two-profile cuts
+- [ ] Entry point specification (SVG point marker or explicit XY in YAML)
+- [ ] Post-processor: contour-only G-code output (no spindle, no Z moves, XY + optional UV)
+- [ ] Arc preservation: ensure `G02`/`G03` pass through to output without linearisation
 
 ---
 

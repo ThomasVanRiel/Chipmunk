@@ -145,7 +145,7 @@ Load Ø6 drill    → touch off Z at tip → run T2_DRILL_6.H
 7. **Heidenhain canned cycles** — CYCL DEF 200, 203, 207; `L X+n Y+n FMAX M99`
 8. **G-code canned cycles** — Haas G81/G83/G84 with G90 guard
 9. **Optional operations** — `optional_skip_level` (1–9); Heidenhain: `M1`; G-code: `/` prefix
-10. **Per-program CLI export** — `--output-dir` writes one file per tool; `--dry-run` lists what would be generated
+10. **Per-program CLI export** — `--output-dir` writes one file per tool; `--check` lists what would be generated
 
 ### CLI
 
@@ -242,7 +242,7 @@ chipmunk job.yaml
 chipmunk job.yaml --output part.H
 # → part.H
 
-chipmunk job.yaml --dry-run
+chipmunk job.yaml --check
 # prints: 3 circles #00ff00 → drill T1
 #         2 circles #0000ff → drill T2
 #         1 path   #ff0000 → profile T3
@@ -275,7 +275,7 @@ The mapping is entirely user-controlled via YAML — this is just a suggested st
 2. **Color-keyed geometry grouping** — `io/svg_reader.rs` returns `Vec<ColorGroup { color: String, entities: Vec<Entity> }>`; DXF reader same
 3. **YAML handler** — load geometry from `job.yaml`, parse → group by color → match each group to `OperationConfig` → run operation → write NC to `--output` / stdout
 4. **`--geometry` override flag** — override the geometry path declared in the YAML (for revised parts without editing the job file)
-5. **`--dry-run` flag** — print color groups and matched operations, exit without generating NC
+5. **`--check` flag** — validate job file: parse geometry, resolve tools, match color groups; print summary and exit without generating NC
 5. **Polygon offset** — `toolpath/offset.rs`: `offset_polygon()`, `iterative_offset()`, contour extraction from color group
 6. **Depth strategy** — `toolpath/depth_strategy.rs`
 7. **Facing generator** — `toolpath/facing.rs`
@@ -290,7 +290,7 @@ The mapping is entirely user-controlled via YAML — this is just a suggested st
 13. `test_offset.rs`, `test_depth_strategy.rs`, `test_facing.rs`, `test_profile.rs`, `test_pocket.rs`
     `test_color_grouping.rs`: SVG with 3 colors → 3 groups with correct entities
     Golden files: `heidenhain_profile.H`, `heidenhain_pocket.H`, `heidenhain_facing.H`
-    CLI integration: `chipmunk fixture_job.yaml --dry-run` matches expected groups
+    CLI integration: `chipmunk fixture_job.yaml --check` matches expected groups
 
 ### Deliverable
 
@@ -319,7 +319,7 @@ Phases 1–4 cover the full 2.5D machining workflow for a no-tool-changer Heiden
 
 Items with clear design but no scheduled phase. Implement when the core CLI workflow is solid.
 
-- **REST API** — axum server exposing the same library functions over HTTP. Peer to the CLI, not a wrapper. Required before any frontend work. Design in `docs/02-api-design.md`.
+- **REST API** — axum server exposing the same library functions over HTTP. Peer to the CLI, not a wrapper. Required before any frontend work. Design in `design/docs/deferred/02-api-design.md`.
 - **Browser frontend** — 2D canvas viewport, operation panels, NC preview. Design in `tasks/backlog.md`.
 - **3D projects** — STEP/STL import, B-rep slicer, Three.js viewport. Most milling is 2.5D; slicing is the same pipeline regardless of input.
 - **Inkscape extension** — appears under Extensions > CAM; calls `chipmunk` CLI; shows parameter dialog in Inkscape. Eliminates file management step.

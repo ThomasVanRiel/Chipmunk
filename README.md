@@ -68,6 +68,8 @@ You start from a drawing — a DXF from a customer, an export from your CAD tool
 ```yaml
 geometry: part.svg           # path to your drawing
 postprocessor: heidenhain
+wcs: G54                     # WCS offset register, emitted at program start
+wcs_marker_color: "#aa00aa"  # circle of this color in the SVG marks the WCS origin
 clearance: 10.0              # Z height for rapids, relative to WCS zero
 
 operations:

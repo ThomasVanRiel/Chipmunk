@@ -190,12 +190,12 @@ Post-processors that support constant surface speed natively (Sinumerik `G96`, H
 
 ---
 
-## Step 3 — Dry run
+## Step 3 — Check
 
-Always run with `--dry-run` first to verify the color grouping is correct:
+Run with `--check` first to verify the job file is valid and the color grouping is correct:
 
 ```
-$ chipmunk clamp_jaw.yaml --dry-run
+$ chipmunk clamp_jaw.yaml --check
 
 WCS origin (G54): circle at (0.000, 0.000) — color #aa00aa
 
@@ -457,7 +457,7 @@ The YAML file is the sole input. All operation parameters live in the YAML; flag
 | `--color <hex>` | e.g. `#ff0000` | Process only operations matching this stroke color |
 | `--tool <n>` | Integer | Output only operations for tool number N |
 | `--allowance <f>` | mm | Override `allowance:` on all matching operations |
-| `--dry-run` | — | Print color groups and matched operations; no NC generated |
+| `--check` | — | Validate job file: parse geometry, resolve tools, match color groups; print summary and exit without generating NC |
 | `--output <path>` | File path | Write NC to file; omit to write to stdout |
 
 ---
