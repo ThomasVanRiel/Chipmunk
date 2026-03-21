@@ -114,6 +114,8 @@ Find the rigid transform (translation + rotation) that best aligns the new geome
 3. **Feature-based matching**: With B-rep, faces can be matched by surface type + area + adjacency rather than just geometric proximity. This is more robust than pure ICP on vertex clouds.
 4. **Validate**: If the residual error after ICP is below threshold, the alignment is good. If not, fall back to bounding-box alignment and flag for user review.
 
+**Reference**: Besl & McKay (1992), *"A Method for Registration of 3-D Shapes"*, IEEE Transactions on Pattern Analysis and Machine Intelligence, 14(2), pp. 239–256. The SVD-based optimal rigid transform step follows the formulation in Arun, Huang & Blostein (1987), *"Least-Squares Fitting of Two 3-D Point Sets"*, IEEE TPAMI 9(5).
+
 ```rust
 pub fn register_geometries(
     old_shape: &TopoDS_Shape,
@@ -319,6 +321,17 @@ This gives a full audit trail of how the part evolved and what adjustments were 
 **Assembly import where part order changed**: Match parts by name and/or geometric similarity rather than by index.
 
 **2D import where layers changed**: Match DXF layers by name. New layers flagged as potential new features.
+
+## Background & Prior Art
+
+The part update pipeline addresses the same class of problem as the **Topological Naming Problem** in parametric CAD — downstream features break when upstream geometry changes because shape topology is identified by unstable indices rather than semantic names. FreeCAD suffered from this for over a decade; the fix (contributed by Zheng Lei / realthunder) was merged in FreeCAD 1.0 (2024). The FreeCAD wiki and realthunder's fork documentation are useful background reading on why this problem is hard and the approaches that have been tried.
+
+Our problem is slightly different — we're not doing parametric history within a kernel, but referencing geometry from an external CAD tool that can change independently. The diff → register → audit → review pipeline mirrors what commercial integrated CAM tools (Fusion 360, HSMWorks/CAM for SolidWorks) do when a linked CAD component is updated.
+
+**References**:
+- Besl & McKay (1992), *"A Method for Registration of 3-D Shapes"*, IEEE TPAMI 14(2) — foundational ICP paper
+- Arun, Huang & Blostein (1987), *"Least-Squares Fitting of Two 3-D Point Sets"*, IEEE TPAMI 9(5) — SVD formulation for the optimal rigid transform step within ICP
+- FreeCAD Toponaming wiki — https://wiki.freecad.org/Topological_naming_problem — explains the broader problem of stable topology references across geometry changes
 
 ## Implementation Phase
 

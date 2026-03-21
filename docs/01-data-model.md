@@ -208,21 +208,37 @@ impl PartGeometry {
 
 **Design note**: `section_at_z()` replaces the old `get_contour_at_z()`. The key improvement is that it returns exact geometry — an arc in the model stays an arc in the cross-section, rather than being approximated as a polyline. For toolpath generators that use polygon offset (pockets), the exact edges are converted to `geo::MultiPolygon` at the toolpath stage. For profiles in controller compensation mode, exact arcs are preserved and emitted directly as `ArcCw`/`ArcCcw` segments.
 
-### TessellatedMesh
+### SelectionMesh
 
-Generated on demand from the B-rep shape for frontend display. Not stored — recomputed when needed.
+Generated on demand from the B-rep shape for frontend display and selection. Not stored — recomputed when needed. Contains both triangle data (for face selection) and edge polylines (for edge selection).
 
 ```rust
 #[derive(Debug, Clone)]
-pub struct TessellatedMesh {
-    pub vertices: Vec<[f64; 3]>,
-    pub normals: Vec<[f64; 3]>,     // Per-vertex normals
-    pub indices: Vec<[u32; 3]>,      // Triangle indices
-    pub face_ids: Vec<u32>,          // One per triangle — maps to FaceInfo.id
+pub struct SelectionMesh {
+    // Triangle mesh — for face rendering and face picking
+    pub vertices: Vec<f32>,     // Flat: [x0,y0,z0, x1,y1,z1, ...]
+    pub normals: Vec<f32>,      // Per-vertex normals, same layout
+    pub indices: Vec<u32>,      // Triangle indices
+    pub face_ids: Vec<u32>,     // One per triangle — maps to FaceInfo.id
+
+    // Edge polylines — for edge rendering and edge picking
+    pub edges: Vec<TessellatedEdge>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TessellatedEdge {
+    pub edge_id: u32,           // Stable index from TopExp_Explorer iteration
+    pub points: Vec<f32>,       // Flat: [x0,y0,z0, x1,y1,z1, ...] — tessellated polyline
 }
 ```
 
-The `face_ids` array enables face selection in the frontend: raycasting identifies a triangle, the triangle's `face_id` identifies the B-rep face, and the backend can then read the face's exact geometry (normal, surface type, edges) for operations like orientation or WCS placement.
+The `face_ids` array enables face selection: raycasting identifies a triangle, the triangle's `face_id` identifies the B-rep face, and the backend can read the face's exact geometry (normal, surface type, edges) for operations like orientation or WCS placement.
+
+The `edges` array enables edge selection: Three.js renders each `TessellatedEdge` as a `LineSegments` object tagged with its `edge_id`. Raycasting against `LineSegments` (with a `linePrecision` tolerance) identifies which edge was clicked. The backend can then retrieve the exact edge curve (line, arc, spline) from the B-rep by `edge_id` for use in profile operations.
+
+Both `face_ids` and `edge_id` use the same stable iteration order as `TopExp_Explorer` over the shape — faces and edges are indexed by their position in a deterministic depth-first traversal. This order is consistent across the tessellation lifetime of a given `TopoDS_Shape`.
+
+**Note on `f32` vs `f64`**: Geometry is computed at `f64` precision internally but downcast to `f32` for the mesh payload. At typical part scales (sub-meter), `f32` provides ~0.01mm precision — sufficient for display. All OCCT computation stays at `f64`.
 
 ### Tool
 

@@ -5,13 +5,15 @@
 NC code generation is a two-stage process:
 
 1. **Compilation** (Rust): Toolpath segments → controller-neutral `NCBlock` intermediate representation
-2. **Post-processing** (Python): `NCBlock` list → machine-specific NC code string
+2. **Post-processing** (Lua): `NCBlock` list → machine-specific NC code string
 
-This separation means toolpath generators never need to know about G-code dialects, and post-processors never need to know about machining strategies. The Rust/Python boundary sits between these two stages, connected via PyO3.
+This separation means toolpath generators never need to know about G-code dialects, and post-processors never need to know about machining strategies. The Rust/Lua boundary sits between these two stages, connected via `mlua`.
+
+Post-processors are written in Lua rather than Python to keep the distribution small. The entire Lua 5.4 VM adds ~300KB to the binary. Built-in post-processors are embedded as Lua source strings at compile time (`include_str!()`). User post-processors are `.lua` files dropped into a config directory — no installation or compilation required.
 
 ## Intermediate Representation (IR)
 
-The IR is defined in Rust (`src/nc/ir.rs`) and mirrored as Python types for the post-processor side.
+The IR is defined in Rust (`src/nc/ir.rs`). When passed to Lua, each `NCBlock` becomes a Lua table.
 
 ### NCBlock (Rust)
 
@@ -58,55 +60,74 @@ pub struct NCBlock {
     pub block_type: BlockType,
     pub params: HashMap<String, serde_json::Value>,
     // Params vary by type:
-    // Rapid/Linear: X, Y, Z, F (feed)
-    // ArcCw/Ccw: X, Y, Z, I, J, K, F
-    // ToolChange: T (tool number), tool_name
-    // SpindleOn: S (speed), direction ("cw"/"ccw")
-    // Dwell: P (seconds)
+    // Rapid/Linear: x, y, z, f (feed)
+    // ArcCw/Ccw: x, y, z, i, j, k, f
+    // ToolChange: t (tool number), tool_name
+    // SpindleOn: s (speed), direction ("cw"/"ccw")
+    // Dwell: p (seconds)
     // Comment: text
     // SetUnits: units ("mm"/"inch")
     // SetWorkOffset: offset ("G54"/"G55"/...)
-    // CompLeft/Right: D (offset register number)
+    // CompLeft/Right: d (offset register number)
     // OptionalSkipStart: skip_level (1-9), label, operation_name
     // OptionalSkipEnd: skip_level (1-9), label
-    // CompOff: (no params)
     // CycleDefine: cycle_type, + cycle-specific params
-    // CycleCall: X, Y (position to execute cycle at)
-    // CycleOff: (no params)
+    // CycleCall: x, y (position to execute cycle at)
 }
 ```
 
-### NCBlock (Python mirror)
+### NCBlock (Lua representation)
 
-The Python-side mirror is defined in `postprocessors/src/camproject_post/base.py`. PyO3 converts Rust `NCBlock` structs into these Python objects before passing them to the post-processor.
+The `mlua` bridge converts each `NCBlock` to a Lua table before calling the post-processor. The `type` field uses snake_case strings. All param keys are lowercase.
 
-```python
-@dataclass
-class NCBlock:
-    block_type: str       # e.g. "rapid", "linear", "tool_change"
-    params: dict[str, Any]
+```lua
+-- Examples of block tables passed to Lua:
+{ type = "rapid",        x = 0.0,   y = 0.0,   z = 25.0 }
+{ type = "linear",       x = 10.0,  y = 20.0,  z = -5.0, f = 800.0 }
+{ type = "arc_cw",       x = 50.0,  y = 20.0,  z = -5.0, i = 0.0, j = 5.0, f = 800.0 }
+{ type = "tool_change",  t = 1,     tool_name = "6mm end mill" }
+{ type = "spindle_on",   s = 18000, direction = "cw" }
+{ type = "spindle_off" }
+{ type = "coolant_on",   mode = "flood" }   -- mode: "flood", "mist", "through_tool"
+{ type = "coolant_off" }
+{ type = "comment",      text = "Rough pocket" }
+{ type = "set_units",    units = "mm" }
+{ type = "set_work_offset", offset = "G54" }
+{ type = "comp_left",    d = 1 }
+{ type = "comp_right",   d = 1 }
+{ type = "comp_off" }
+{ type = "dwell",        p = 0.5 }
+{ type = "program_end" }
+{ type = "optional_skip_start", skip_level = 1, label = "SKIP1", operation_name = "Finish profile" }
+{ type = "optional_skip_end",   skip_level = 1, label = "SKIP1" }
+```
+
+The context table:
+```lua
+{
+    project_name = "My Part",
+    units = "mm",            -- "mm" or "inch"
+    num_tools = 3,
+    date = "2026-03-21",
+    estimated_time_min = 12.3,  -- nil if not computed
+}
 ```
 
 ### Compiler (Rust)
 
-The compiler transforms a list of `Toolpath` objects (from one or more operations) into a complete NC program as a list of `NCBlock`:
+The compiler transforms a list of `Toolpath` objects into a complete NC program as a `Vec<NCBlock>`:
 
 ```rust
 pub fn compile_program(
     operations: &[Operation],
     project: &Project,
 ) -> Vec<NCBlock> {
-    // Compile operations into a complete NC program.
-    //
-    // Inserts:
-    // - Program start (units, work offset, absolute mode)
-    // - For each operation: tool change, spindle on, coolant, toolpath, spindle off
-    // - Program end
+    // Compile all operations into a complete NC program.
 }
 ```
 
 **Compilation order**:
-1. Program header (comment with project name, date)
+1. Program header comment (project name, date)
 2. Safety line: units, absolute mode, XY plane, feed-per-minute
 3. For each setup (operations grouped by `setup_id`):
    a. Work offset from setup WCS (G54/G55/...)
@@ -114,205 +135,440 @@ pub fn compile_program(
       - Tool change
       - Spindle on at specified RPM
       - Coolant on (if enabled)
-      - Rapid to clearance height (from setup or operation override)
+      - Rapid to clearance height
       - Toolpath segments (rapid/linear/arc)
       - Rapid to clearance height
       - Spindle off (if last operation for this tool)
    c. Full retraction between setups (spindle off, coolant off, retract to safe Z)
-      — the post-processor handles the specific retraction sequence
-4. Return to home position
+4. Return to home
 5. Program end (M30)
 
-**Setup-aware compilation**: Operations inherit WCS, stock, and clearance height from their parent setup, with per-operation overrides. Between setups, the compiler inserts full retraction blocks to ensure a safe state before the next setup's work offset takes effect. The post-processor's `format_setup_transition()` method (if provided) can customize this retraction sequence for the target controller.
+**Optimization**: The compiler tracks modal state and omits redundant values. Consecutive linear moves at the same feed rate omit `f` from the second block — the post-processor then omits `F` from that line.
 
-**Optimization**: The compiler tracks modal state (current position, current feed rate, current tool) and omits redundant values. For example, if two consecutive linear moves have the same feed rate, the second `NCBlock` omits the `F` parameter — the post-processor then omits `F` from that line.
+---
 
 ## Post-Processor System
 
-### PostProcessor ABC (Python)
+### Lua Module Interface
 
-```python
-from abc import ABC, abstractmethod
+A post-processor is a Lua file that returns a module table. The minimum required fields are `name`, `file_extension`, and `generate`. Everything else is optional.
 
-class PostProcessor(ABC):
-    """Base class for all post-processors."""
+```lua
+-- postprocessors/linuxcnc.lua
+local base = require("base")   -- shared helpers (see below)
+local M = {}
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Human-readable name, e.g. 'LinuxCNC'."""
-        ...
+M.name           = "LinuxCNC"
+M.file_extension = ".ngc"
 
-    @property
-    @abstractmethod
-    def file_extension(self) -> str:
-        """Output file extension, e.g. '.ngc'."""
-        ...
+-- Optional: declare which canned cycle types this post-processor supports.
+-- Omit or return empty table for no cycle support (cycles expanded to explicit moves).
+M.supported_cycles = { "drill", "peck_drill", "spot_drill", "bore", "tap" }
 
-    @abstractmethod
-    def format_block(self, block: NCBlock) -> str | None:
-        """
-        Format a single NCBlock as a line of NC code.
-        Return None to skip the block (e.g., unsupported block types).
-        """
-        ...
+-- Optional: how to implement optional operation skipping.
+-- "block_delete" (default) or "jump"
+M.optional_skip_strategy = "block_delete"
 
-    def preamble(self, context: ProgramContext) -> list[str]:
-        """Lines to emit before the first block. Override for machine-specific headers."""
-        return []
+-- Required: generate complete NC code from the block list.
+-- blocks: array of block tables (see IR section above)
+-- context: program context table
+-- Returns: NC code as a single string
+function M.generate(blocks, context)
+    local out = {}
 
-    def postamble(self, context: ProgramContext) -> list[str]:
-        """Lines to emit after the last block. Override for machine-specific footers."""
-        return []
+    -- Preamble
+    out[#out+1] = "%"
+    out[#out+1] = string.format("(%s)", context.project_name)
+    out[#out+1] = string.format("(Generated: %s)", context.date)
+    out[#out+1] = "G90 G94 G17"
+    out[#out+1] = context.units == "mm" and "G21" or "G20"
 
-    def format_number(self, value: float, decimal_places: int = 3) -> str:
-        """Format a coordinate value. Override for dialect-specific formatting."""
-        return f"{value:.{decimal_places}f}"
+    -- Blocks
+    local n = 10
+    for _, block in ipairs(blocks) do
+        local line = M.format_block(block)
+        if line then
+            out[#out+1] = string.format("N%04d %s", n, line)
+            n = n + 10
+        end
+    end
 
-    def format_blocks(self, block: NCBlock, prev: NCBlock | None, next: NCBlock | None) -> list[str]:
-        """
-        Format a single NCBlock as one or more lines of NC code.
-        Returns empty list to skip the block.
+    -- Postamble
+    out[#out+1] = "%"
+    return table.concat(out, "\n") .. "\n"
+end
 
-        The prev/next context allows post-processors that need to look ahead or behind
-        (e.g., Heidenhain combining compensation with the next move).
+-- Optional: format a single block as a line of NC code.
+-- Return nil to skip the block (e.g., unsupported block types).
+-- Used by the default generate() if you want block-by-block formatting
+-- without rewriting the whole loop.
+function M.format_block(block)
+    if block.type == "rapid" then
+        return string.format("G0%s", base.coords(block))
+    elseif block.type == "linear" then
+        return string.format("G1%s%s", base.coords(block), base.feed(block))
+    elseif block.type == "arc_cw" then
+        return string.format("G2%s%s", base.arc_coords(block), base.feed(block))
+    elseif block.type == "arc_ccw" then
+        return string.format("G3%s%s", base.arc_coords(block), base.feed(block))
+    elseif block.type == "tool_change" then
+        return string.format("T%d M6", block.t)
+    elseif block.type == "spindle_on" then
+        local dir = block.direction == "ccw" and "M4" or "M3"
+        return string.format("S%.0f %s", block.s, dir)
+    elseif block.type == "spindle_off" then
+        return "M5"
+    elseif block.type == "coolant_on" then
+        return block.mode == "mist" and "M7" or "M8"
+    elseif block.type == "coolant_off" then
+        return "M9"
+    elseif block.type == "dwell" then
+        return string.format("G4 P%.3f", block.p)
+    elseif block.type == "comment" then
+        return string.format("(%s)", block.text)
+    elseif block.type == "set_work_offset" then
+        return block.offset
+    elseif block.type == "comp_left" then
+        return string.format("G41 D%02d", block.d)
+    elseif block.type == "comp_right" then
+        return string.format("G42 D%02d", block.d)
+    elseif block.type == "comp_off" then
+        return "G40"
+    elseif block.type == "program_end" then
+        return "M30"
+    elseif block.type == "optional_skip_start" then
+        M._in_skip = true
+        M._skip_prefix = block.skip_level > 1
+            and string.format("/%d ", block.skip_level) or "/ "
+        return string.format("(%s)", "Optional: " .. block.operation_name)
+    elseif block.type == "optional_skip_end" then
+        M._in_skip = false
+        return nil
+    end
+    return nil  -- unknown block types are skipped
+end
 
-        Default implementation delegates to format_block() for backwards compatibility.
-        """
-        line = self.format_block(block)
-        return [line] if line is not None else []
-
-    def generate(self, blocks: list[NCBlock], context: ProgramContext) -> str:
-        """
-        Generate complete NC code from a block list.
-
-        Can be overridden entirely for non-G-code formats (e.g., Heidenhain
-        conversational) where the block-by-block model doesn't map cleanly.
-        """
-        lines = self.preamble(context)
-        for i, block in enumerate(blocks):
-            prev_block = blocks[i - 1] if i > 0 else None
-            next_block = blocks[i + 1] if i < len(blocks) - 1 else None
-            lines.extend(self.format_blocks(block, prev_block, next_block))
-        lines.extend(self.postamble(context))
-        return "\n".join(lines) + "\n"
-
-@dataclass
-class ProgramContext:
-    """Metadata passed to post-processors for header/footer generation."""
-    project_name: str
-    units: str            # "mm" or "inch"
-    num_tools: int
-    date: str
-    estimated_time_min: float | None
+return M
 ```
 
-### PyO3 Bridge
+### `base.lua` — Shared Helpers
 
-The `nc/bridge.rs` module handles the Rust → Python → Rust roundtrip:
+A shared `base.lua` module is embedded alongside the built-in post-processors. It provides coordinate formatting, number formatting, and other utilities post-processors commonly need.
 
-1. **Initialization**: On first use, PyO3 starts an embedded Python interpreter
-2. **Discovery**: Calls `importlib.metadata.entry_points(group="camproject.postprocessors")` to find installed post-processors
-3. **Conversion**: Converts `Vec<NCBlock>` to a Python list of `NCBlock` objects (using the Python-side `NCBlock` dataclass)
-4. **Execution**: Instantiates the selected `PostProcessor` subclass and calls `generate(blocks, context)`
-5. **Result**: Returns the NC code `String` back to Rust
+```lua
+-- base.lua (embedded, available via require("base"))
+local M = {}
+
+function M.fmt(value, places)
+    places = places or 3
+    return string.format("%." .. places .. "f", value)
+end
+
+-- Format XYZ coordinates present in a block (omits absent axes)
+function M.coords(block)
+    local s = ""
+    if block.x ~= nil then s = s .. string.format(" X%.3f", block.x) end
+    if block.y ~= nil then s = s .. string.format(" Y%.3f", block.y) end
+    if block.z ~= nil then s = s .. string.format(" Z%.3f", block.z) end
+    return s
+end
+
+-- Format IJK arc center offsets
+function M.arc_coords(block)
+    local s = M.coords(block)
+    if block.i ~= nil then s = s .. string.format(" I%.3f", block.i) end
+    if block.j ~= nil then s = s .. string.format(" J%.3f", block.j) end
+    return s
+end
+
+-- Format feed rate (omit if nil — modal, unchanged from previous block)
+function M.feed(block)
+    if block.f then return string.format(" F%.0f", block.f) end
+    return ""
+end
+
+return M
+```
+
+### mlua Bridge (Rust)
+
+The `nc/bridge.rs` module handles the Rust → Lua → Rust roundtrip:
 
 ```rust
-// nc/bridge.rs (simplified)
-pub fn list_postprocessors() -> Result<Vec<PostProcessorInfo>> {
-    Python::with_gil(|py| {
-        // Call importlib.metadata.entry_points(group="camproject.postprocessors")
-        // Return name, file extension for each
-    })
+// nc/bridge.rs
+use mlua::prelude::*;
+
+pub struct LuaBridge {
+    lua: Lua,
 }
 
-pub fn generate_nc_code(
-    blocks: &[NCBlock],
-    context: &ProgramContext,
-    postprocessor_id: &str,
-) -> Result<String> {
-    Python::with_gil(|py| {
-        // 1. Convert NCBlocks to Python objects
-        // 2. Load the post-processor class via entry point
-        // 3. Call post.generate(blocks, context)
-        // 4. Return the resulting string
-    })
+impl LuaBridge {
+    pub fn new() -> Result<Self> {
+        let lua = Lua::new();
+        // Load base.lua helper module
+        let base_src = include_str!("../postprocessors/base.lua");
+        lua.load(base_src).set_name("base").exec()?;
+        Ok(Self { lua })
+    }
+
+    pub fn list_postprocessors(&self) -> Vec<PostProcessorInfo> {
+        // Return info for all discovered post-processors (built-in + user)
+    }
+
+    pub fn generate_nc_code(
+        &self,
+        blocks: &[NCBlock],
+        context: &ProgramContext,
+        postprocessor_id: &str,
+    ) -> Result<String> {
+        let script = self.load_postprocessor(postprocessor_id)?;
+        let pp: LuaTable = self.lua.load(&script).eval()?;
+
+        let blocks_table = self.blocks_to_lua(blocks)?;
+        let context_table = self.context_to_lua(context)?;
+
+        let generate: LuaFunction = pp.get("generate")?;
+        let result: String = generate.call((blocks_table, context_table))?;
+        Ok(result)
+    }
 }
 ```
+
+A new `Lua` instance is created per request (not shared across threads) because Lua is single-threaded. The `Lua` instance creation is cheap — the expensive part is loading scripts, so built-in post-processor sources are pre-loaded once at server startup and cached as strings.
+
+### Plugin Discovery
+
+Post-processors are discovered in two places:
+
+**Built-in** (embedded at compile time):
+```rust
+// nc/postprocessors/mod.rs
+pub const BUILTIN_POSTPROCESSORS: &[(&str, &str)] = &[
+    ("linuxcnc", include_str!("linuxcnc.lua")),
+    ("grbl",     include_str!("grbl.lua")),
+    ("marlin",   include_str!("marlin.lua")),
+    ("fanuc",    include_str!("fanuc.lua")),
+    ("sinumerik",include_str!("sinumerik.lua")),
+    ("heidenhain",include_str!("heidenhain.lua")),
+];
+```
+
+**User-defined** (scanned at startup from config directory):
+```
+~/.config/camproject/postprocessors/   (Linux/macOS)
+%APPDATA%\camproject\postprocessors\   (Windows)
+```
+
+Any `.lua` file in this directory is loaded and registered. The filename (minus extension) becomes the post-processor ID. User post-processors with the same ID as a built-in override the built-in.
+
+### Writing a Custom Post-Processor
+
+Create a `.lua` file and place it in the user postprocessors directory:
+
+```lua
+-- ~/.config/camproject/postprocessors/haas.lua
+local base = require("base")
+local M = {}
+
+M.name           = "Haas"
+M.file_extension = ".nc"
+M.supported_cycles = { "drill", "peck_drill", "bore", "tap" }
+
+function M.generate(blocks, context)
+    local out = {}
+    out[#out+1] = string.format("%%")
+    out[#out+1] = string.format("O0001 (%s)", context.project_name)
+
+    local n = 10
+    for _, block in ipairs(blocks) do
+        local line = M.format_block(block)
+        if line then
+            out[#out+1] = string.format("N%d %s", n, line)
+            n = n + 10
+        end
+    end
+
+    out[#out+1] = "M30"
+    out[#out+1] = "%"
+    return table.concat(out, "\n") .. "\n"
+end
+
+function M.format_block(block)
+    -- Haas is Fanuc-compatible with minor differences
+    if block.type == "tool_change" then
+        -- Haas tool change syntax
+        return string.format("T%02d M6", block.t)
+    end
+    -- Delegate to built-in Fanuc for everything else
+    -- (in practice, you'd copy-paste or require a shared base)
+    return nil
+end
+
+return M
+```
+
+No installation required. Restart the server and the post-processor appears in the list.
 
 ### Built-in Post-Processors
 
 #### LinuxCNC (`.ngc`)
 - Line numbers: `N0010`, `N0020`, ...
-- Trailing decimal points on integers: `X10.000`
-- Percent signs wrapping program: `%` at start and end
-- `M2` or `M30` for program end
-- Full G-code set including canned cycles
+- Trailing decimal points: `X10.000`
+- Percent signs wrapping program
+- `M30` for program end
+- Full canned cycle set
 
 #### Grbl (`.gcode`)
-- No line numbers (saves bandwidth on serial)
+- No line numbers (saves serial bandwidth)
 - No percent signs
 - `M2` for program end
-- Limited G-code set (no canned cycles — drill cycles expanded to explicit moves)
-- `$H` homing support as optional preamble
+- No canned cycles — drill cycles expanded to explicit moves
+- Single-level block delete only
 
 #### Generic Fanuc (`.nc`)
 - Line numbers: `N1`, `N2`, ...
 - `O0001` program number in header
 - Trailing decimal points: `X10.`
-- `M30` program end with rewind
+- `M30` with rewind
 - Standard Fanuc modal groups
 
 #### Marlin (`.gcode`)
 - No line numbers
-- Designed for CNC-adapted 3D printers
+- For CNC-adapted 3D printers
 - `M3`/`M5` for spindle (or laser)
-- `G28` for homing
-- Simpler preamble/postamble
+- `G28` homing in preamble
 
 #### Sinumerik (`.mpf`)
 - Line numbers: `N10`, `N20`, ...
-- `G0`/`G1`/`G2`/`G3` standard motion (same as Fanuc base)
-- Cutter compensation: `G41`/`G42`/`G40` (standard)
 - Block delete: `/1` through `/8`
-- Conditional jumps: `IF condition GOTOF label` / `IF condition GOTOB label`
-- Variables: `R1`-`R999` for parameters
+- Variables: `R1`–`R999`
+- Conditional jumps: `IF condition GOTOF label`
 - `M30` program end
-- Subprogram support: `PROC` / `RET` (future)
 
 #### Heidenhain TNC (`.h`)
 
-Heidenhain uses **conversational programming**, a completely different syntax from G-code. This is not a G-code dialect — it's a separate language. The Heidenhain post-processor overrides `generate()` to handle the structural differences.
+Heidenhain uses **conversational programming** — a completely different syntax from G-code. The Heidenhain post-processor overrides `generate()` entirely rather than using `format_block()`.
 
-**Key syntax differences from G-code**:
+**Key syntax differences**:
 
 | Concept | G-code | Heidenhain |
 |---------|--------|------------|
 | Line numbering | `N10` (optional) | Mandatory, every line: `0`, `1`, `2`, ... |
 | Rapid move | `G0 X10 Y20 Z5` | `L X+10 Y+20 Z+5 FMAX` |
 | Linear feed | `G1 X10 Y20 F500` | `L X+10 Y+20 F500` |
-| Arc CW | `G2 X10 Y20 I5 J0` | `CR X+10 Y+20 R+5 DR-` (radius form) or `CC`/`C` (center form) |
-| Arc CCW | `G3 X10 Y20 I5 J0` | `CR X+10 Y+20 R+5 DR+` or `CC`/`C` |
+| Arc CW | `G2 X10 Y20 I5 J0` | `CR X+10 Y+20 R+5 DR-` |
+| Arc CCW | `G3 X10 Y20 I5 J0` | `CR X+10 Y+20 R+5 DR+` |
 | Tool change | `T1 M6` | `TOOL CALL 1 Z S18000` |
 | Spindle on | `S18000 M3` | (included in `TOOL CALL`) |
-| Spindle off | `M5` | `M5` (same) |
 | Comp left | `G41 D1` | `L ... RL` (appended to move) |
 | Comp right | `G42 D1` | `L ... RR` (appended to move) |
 | Comp off | `G40` | `L ... R0` (appended to move) |
-| Coolant on | `M8` | `M8` (same) |
-| Program end | `M30` | `M30` or `END PGM` |
-| Stock def | (none) | `BLK FORM 0.1 Z X-0 Y-0 Z-20` / `BLK FORM 0.2 X+100 Y+80 Z+0` |
-| Coordinates | `X10.000` | `X+10` or `X-10` (explicit sign always required) |
+| Program end | `M30` | `END PGM name MM` |
+| Stock def | (none) | `BLK FORM 0.1 Z X...` |
+| Coordinates | `X10.000` | `X+10` (explicit sign always required) |
 
-**Heidenhain-specific features**:
-- `BLK FORM` in preamble defines stock for simulation (maps from `StockDefinition`)
-- Coordinates always carry an explicit `+` or `-` sign
-- Cutter compensation (`RL`/`RR`/`R0`) is appended to the move line, not a separate block — this is why `format_blocks()` receives `prev`/`next` context
-- Arcs can use center-point form (`CC` to set center, then `C` to cut) or radius form (`CR`)
-- Cycles use `CYCL DEF` / `CYCL CALL` syntax for drilling, pocketing, etc. (though we generate explicit moves rather than relying on controller cycles, to keep the CAM in control)
+The Heidenhain post-processor maintains a line counter and handles the structural mapping in its `generate()` override. Cutter compensation (`RL`/`RR`/`R0`) is appended to move lines rather than emitted as separate blocks, so the generator looks ahead in the block list.
 
-**Example output** (same facing operation as G-code example):
+**Drilling on Heidenhain**:
 
+The Heidenhain post-processor declares cycle support via `supported_cycles`. The Rust compiler sees this and emits `CycleDefine`/`CycleCall`/`CycleOff` blocks instead of explicit moves. The post-processor maps each cycle type to its `CYCL DEF` number and formats the Q-parameters:
+
+```lua
+M.supported_cycles = { "drill", "peck_drill", "spot_drill", "bore", "tap" }
+
+-- Heidenhain coordinates always carry an explicit sign
+local function hh_coord(v)
+    return v >= 0 and string.format("+%.3f", v) or string.format("%.3f", v)
+end
+
+local function hh_num(v)
+    return v >= 0 and string.format("+%-7.3f", v) or string.format("%-7.3f", v)
+end
+
+local function format_cycl_def(block, state)
+    local lines = {}
+
+    if block.cycle_type == "drill" then
+        lines[#lines+1] = string.format("%d CYCL DEF 200 DRILLING ~", state.n)
+        lines[#lines+1] = string.format("  Q200=%s ;SET-UP CLEARANCE",     hh_num(2.0))
+        lines[#lines+1] = string.format("  Q201=%s ;DEPTH",                hh_num(block.z))
+        lines[#lines+1] = string.format("  Q206=%s ;FEED RATE PLUNGING",   hh_num(block.f))
+        lines[#lines+1] = string.format("  Q202=%s ;INFEED DEPTH",         hh_num(math.abs(block.z)))
+        lines[#lines+1] = string.format("  Q210=%s ;DWELL TIME AT TOP",    hh_num(0))
+        lines[#lines+1] = string.format("  Q203=%s ;SURFACE COORDINATE",   hh_num(0))
+        lines[#lines+1] = string.format("  Q204=%s ;2ND SET-UP CLEARANCE", hh_num(10))
+        lines[#lines+1] = string.format("  Q211=%s ;DWELL TIME AT BOTTOM", hh_num(0))
+
+    elseif block.cycle_type == "peck_drill" then
+        lines[#lines+1] = string.format("%d CYCL DEF 203 UNIVERSAL DRILLING ~", state.n)
+        lines[#lines+1] = string.format("  Q200=%s ;SET-UP CLEARANCE",      hh_num(2.0))
+        lines[#lines+1] = string.format("  Q201=%s ;DEPTH",                 hh_num(block.z))
+        lines[#lines+1] = string.format("  Q206=%s ;FEED RATE PLUNGING",    hh_num(block.f))
+        lines[#lines+1] = string.format("  Q202=%s ;PLUNGING DEPTH",        hh_num(block.q))
+        lines[#lines+1] = string.format("  Q210=%s ;DWELL TIME AT TOP",     hh_num(0))
+        lines[#lines+1] = string.format("  Q203=%s ;SURFACE COORDINATE",    hh_num(0))
+        lines[#lines+1] = string.format("  Q204=%s ;2ND SET-UP CLEARANCE",  hh_num(10))
+        lines[#lines+1] = string.format("  Q212=%s ;DECREMENT",             hh_num(0))
+        lines[#lines+1] = string.format("  Q213=%s ;BREAKS",                hh_num(3))
+        lines[#lines+1] = string.format("  Q205=%s ;MIN. PLUNGING DEPTH",   hh_num(0))
+        lines[#lines+1] = string.format("  Q211=%s ;DWELL TIME AT BOTTOM",  hh_num(0))
+        lines[#lines+1] = string.format("  Q208=%s ;FEED RATE RETRACTION",  hh_num(99999))
+        lines[#lines+1] = string.format("  Q256=%s ;DIST CHIP BREAKING",    hh_num(0.2))
+
+    elseif block.cycle_type == "tap" then
+        lines[#lines+1] = string.format("%d CYCL DEF 207 RIGID TAPPING ~", state.n)
+        lines[#lines+1] = string.format("  Q200=%s ;SET-UP CLEARANCE",     hh_num(2.0))
+        lines[#lines+1] = string.format("  Q201=%s ;DEPTH",                hh_num(block.z))
+        lines[#lines+1] = string.format("  Q239=%s ;PITCH",                hh_num(block.pitch))
+        lines[#lines+1] = string.format("  Q203=%s ;SURFACE COORDINATE",   hh_num(0))
+        lines[#lines+1] = string.format("  Q204=%s ;2ND SET-UP CLEARANCE", hh_num(10))
+    end
+
+    state.n = state.n + 1
+    return table.concat(lines, "\n")
+end
+
+-- In M.generate(), cycle blocks are handled alongside regular motion blocks:
+-- ...
+if block.type == "cycle_define" then
+    out[#out+1] = format_cycl_def(block, state)
+elseif block.type == "cycle_call" then
+    -- Position move with M99 — triggers the active cycle at this XY position
+    out[#out+1] = string.format("%d L X%s Y%s FMAX M99",
+        state.n, hh_coord(block.x), hh_coord(block.y))
+    state.n = state.n + 1
+elseif block.type == "cycle_off" then
+    -- TNC cancels the cycle implicitly after the last M99 when a non-cycle
+    -- move follows. Explicit cancel only needed when switching cycle types.
+    -- Emit nothing.
+end
+```
+
+Output for a peck drill at three points, depth 25mm, peck 5mm:
+
+```
+42 CYCL DEF 203 UNIVERSAL DRILLING ~
+  Q200=+2.000  ;SET-UP CLEARANCE
+  Q201=-25.000 ;DEPTH
+  Q206=+200.000 ;FEED RATE PLUNGING
+  Q202=+5.000  ;PLUNGING DEPTH
+  Q210=+0.000  ;DWELL TIME AT TOP
+  Q203=+0.000  ;SURFACE COORDINATE
+  Q204=+10.000 ;2ND SET-UP CLEARANCE
+  Q212=+0.000  ;DECREMENT
+  Q213=+3.000  ;BREAKS
+  Q205=+0.000  ;MIN. PLUNGING DEPTH
+  Q211=+0.000  ;DWELL TIME AT BOTTOM
+  Q208=+99999.000 ;FEED RATE RETRACTION
+  Q256=+0.200  ;DIST CHIP BREAKING
+43 L X+10.000 Y+10.000 FMAX M99
+44 L X+30.000 Y+10.000 FMAX M99
+45 L X+50.000 Y+10.000 FMAX M99
+```
+
+If the user targets Grbl instead (no cycle support), `DrillOperation::compile_nc` returns `None`, the compiler falls back to `compile_toolpath_generic`, and the post-processor receives ordinary `Rapid`/`Linear` blocks — no cycle handling needed in the Grbl post-processor at all.
+
+**Example output** (facing operation):
 ```
 0  BEGIN PGM MYPART MM
 1  BLK FORM 0.1 Z X-0 Y-0 Z-20
@@ -323,382 +579,198 @@ Heidenhain uses **conversational programming**, a completely different syntax fr
 6  L Z+5 FMAX
 7  L Z-0.5 F300
 8  L X+105 F800
-9  L Z+5 FMAX
-10 L Y-2.6 FMAX
-11 L Z-0.5 F300
-12 L X-5 F800
 ...
-50 L Z+25 FMAX
-51 M5
-52 M9
 53 END PGM MYPART MM
 ```
 
-**Implementation note**: The Heidenhain post-processor overrides `generate()` rather than relying solely on `format_block()`. It maintains state (current compensation mode, current tool, block numbering) and handles the structural mapping from NCBlocks to conversational syntax. This is acceptable — the PostProcessor ABC is designed to allow full `generate()` override for non-G-code formats.
+---
 
-### Plugin Discovery
+## Drill Strategies
 
-Post-processors are discovered at runtime via Python entry points. The Rust side calls into Python via PyO3 to discover and instantiate them.
+The `DrillOperation` supports several strategies, selected via `strategy:` in the YAML job file. All strategies share the same geometry input (a list of XY positions) but produce different NC output.
 
-```toml
-# In pyproject.toml of the main post-processor package or any plugin package:
-[project.entry-points."camproject.postprocessors"]
-linuxcnc = "camproject_post.linuxcnc:LinuxCNCPost"
-grbl = "camproject_post.grbl:GrblPost"
+| Strategy | YAML value | Description |
+|---|---|---|
+| Manual | `manual` | Rapid to XY at clearance, `Stop` (M0). Operator drills with quill or hand tool, presses cycle start to continue. No Z motion from the machine. |
+| Simple | `simple` | Machine feeds down to full depth in one pass, retracts. No `CycleDefine` — explicit moves. |
+| Peck | `peck` | Feeds in increments (`peck_depth`), retracts fully between pecks to clear chips. Emits `CycleDefine(peck_drill)` when post-processor supports it. |
+| Chip break | `chip_break` | Feeds in increments, retracts by a small amount (not fully) to break chips without clearing them. |
+| Bore | `bore` | Feeds down at boring feed rate, retracts at same rate (oriented). |
+| Tap | `tap` | Synchronised feed: `feed = pitch × RPM`. |
+
+### Manual Drill
+
+The manual strategy produces a simple XY traversal program with no Z motion and no spindle commands. The operator runs the program in **single block mode** — the controller executes one block at a time and pauses after each, waiting for cycle start. The operator drills each hole by hand (quill or hand drill) and presses cycle start to advance to the next position.
+
+This is preferable to inserting `STOP` (M0) blocks between positions because:
+- No spindle state to manage — `M3`/`M5` are omitted; the operator starts the spindle manually if needed, or not at all
+- Single block mode is a standard operator skill; the program itself stays clean
+- The operator can choose to advance multiple positions without stopping simply by not being in single block mode
+
+The NC output (Heidenhain):
+
+```
+TOOL CALL 1 Z S0             ; tool call, no spindle speed
+L Z+10.000 FMAX              ; raise to clearance (no M3)
+L X+15.000 Y+20.000 FMAX    ; position over hole 1  ← stop here in single block
+L X+45.000 Y+20.000 FMAX    ; position over hole 2  ← stop here in single block
+L X+75.000 Y+20.000 FMAX    ; position over hole 3  ← stop here in single block
+L Z+10.000 FMAX              ; retract (no M5)
 ```
 
-```python
-# Discovery (called from Rust via PyO3)
-from importlib.metadata import entry_points
+In the IR, manual drill compiles to `Rapid` blocks only — no `Stop`, no `CycleDefine`, no spindle blocks. Every post-processor handles this without any special cycle support.
 
-def discover_postprocessors() -> dict[str, type]:
-    """Discover all registered post-processors."""
-    eps = entry_points(group="camproject.postprocessors")
-    return {ep.name: ep.load() for ep in eps}
+```yaml
+# YAML
+strategy: manual
+# depth, peck_depth, feed_rate, spindle_speed are all ignored
 ```
 
-### Writing a Custom Post-Processor
+---
 
-A third-party package can provide a custom post-processor by:
+## Canned Cycles
 
-1. Creating a class that extends `PostProcessor` (from `camproject_post.base`)
-2. Registering it as an entry point in their `pyproject.toml`
-3. Installing the package into the Python environment used by CAMproject
+Canned cycles let the controller handle repetitive patterns internally. The IR supports them via `CycleDefine` / `CycleCall` / `CycleOff` blocks. Toolpath generators always produce explicit moves as fallback — canned cycles are an opt-in layer on top.
 
-```python
-# my_custom_post/haas.py
-from camproject_post.base import PostProcessor, NCBlock, ProgramContext
+Post-processors declare support via `supported_cycles`:
 
-class HaasPost(PostProcessor):
-    @property
-    def name(self) -> str:
-        return "Haas"
-
-    @property
-    def file_extension(self) -> str:
-        return ".nc"
-
-    def format_block(self, block: NCBlock) -> str | None:
-        # HAAS-specific formatting
-        ...
-```
-
-```toml
-# my_custom_post/pyproject.toml
-[project.entry-points."camproject.postprocessors"]
-haas = "my_custom_post.haas:HaasPost"
-```
-
-## Canned Cycles (Future)
-
-Canned cycles let the controller handle repetitive motion patterns internally rather than executing explicit move-by-move G-code. This results in shorter programs, and the controller can optimize the motion (e.g., faster retract in a drill cycle). Canned cycle support is **not in the initial implementation** but the IR and post-processor architecture are designed to accommodate it.
-
-### Architecture
-
-The approach is a **dual-path** design:
-
-1. **Toolpath generators always produce explicit moves** (rapid/linear/arc segments). This is the universal fallback that works on every controller.
-2. **The NC compiler optionally recognizes cycle-eligible patterns** and emits `CycleDefine` / `CycleCall` blocks instead of explicit moves, when the target post-processor declares cycle support.
-3. **Post-processors that don't support cycles** (e.g., Grbl) ignore `CycleDefine`/`CycleCall` and fall back to the expanded moves. The compiler emits both forms: the cycle blocks and the equivalent explicit blocks wrapped in a `CYCLE_EXPANDED` group that the post-processor can choose between.
-
-```python
-class PostProcessor(ABC):
-    # ...existing methods...
-
-    @property
-    def supported_cycles(self) -> set[str]:
-        """
-        Return the set of cycle types this post-processor supports natively.
-        Default: empty (no cycle support — all cycles are expanded to explicit moves).
-        Override to declare support, e.g.: {"drill", "peck_drill", "contour_pocket"}
-        """
-        return set()
+```lua
+M.supported_cycles = { "drill", "peck_drill" }
+-- If omitted or empty: all cycles fall back to explicit moves
 ```
 
 ### Cycle Types in the IR
 
 ```
-CYCLE_DEFINE params by cycle_type:
+CycleDefine params by cycle_type:
 
-Drilling cycles:
-  cycle_type="drill":         Z (final depth), R (retract plane), F (feed)
-  cycle_type="peck_drill":    Z, R, F, Q (peck increment)
-  cycle_type="spot_drill":    Z, R, F
-  cycle_type="bore":          Z, R, F, P (dwell at bottom)
-  cycle_type="tap":           Z, R, F, pitch
+Drilling:
+  cycle_type="drill":      z, r, f
+  cycle_type="peck_drill": z, r, f, q (peck increment)
+  cycle_type="spot_drill": z, r, f
+  cycle_type="bore":       z, r, f, p (dwell)
+  cycle_type="tap":        z, r, f, pitch
 
-Milling cycles (more complex — controller-specific):
-  cycle_type="contour_pocket":   Z, R, F, stepover, finish_allowance
-  cycle_type="contour_profile":  Z, R, F, approach_type
-  cycle_type="face_mill":        Z, R, F, stepover, width, length
+Milling (future):
+  cycle_type="contour_pocket":  z, r, f, stepover, finish_allowance
+  cycle_type="face_mill":       z, r, f, stepover, width, length
 ```
 
-### How Post-Processors Format Cycles
-
-#### G-code (Fanuc/LinuxCNC/Haas)
-
-Drilling cycles use modal G-codes with position calls:
+### G-code Cycle Format
 
 ```gcode
-G83 Z-25.0 R2.0 Q5.0 F200   (peck drill cycle definition)
-X10.0 Y10.0                   (drill at position 1)
-X30.0 Y10.0                   (drill at position 2)
-X50.0 Y10.0                   (drill at position 3)
-G80                            (cancel cycle)
+G83 Z-25.0 R2.0 Q5.0 F200   ; peck drill cycle definition
+X10.0 Y10.0                   ; drill at position 1
+X30.0 Y10.0                   ; drill at position 2
+G80                            ; cancel cycle
 ```
 
-Cycle types map to:
 | IR cycle_type | G-code |
-|---------------|--------|
+|---|---|
 | `drill` | `G81` |
 | `peck_drill` | `G83` |
-| `spot_drill` | `G81` (shallow) |
-| `bore` | `G85` / `G86` |
+| `bore` | `G85`/`G86` |
 | `tap` | `G84` |
 
-Milling cycles are generally **not** available as canned cycles in standard G-code. The G-code post-processors only use canned cycles for drilling patterns.
-
-#### Heidenhain TNC
-
-Heidenhain has a rich set of canned cycles defined with `CYCL DEF` and called with `CYCL CALL`:
+### Heidenhain Cycle Format
 
 ```
 CYCL DEF 200 DRILLING ~
   Q200=2    ;SET-UP CLEARANCE ~
   Q201=-25  ;DEPTH ~
-  Q206=200  ;FEED RATE FOR PLUNGING ~
-  Q202=5    ;INFEED DEPTH ~
-  Q210=0    ;DWELL TIME AT TOP ~
-  Q203=0    ;SURFACE COORDINATE ~
-  Q204=10   ;2ND SET-UP CLEARANCE
+  Q206=200  ;FEED RATE ~
+  Q202=5    ;INFEED DEPTH
 L X+10 Y+10 FMAX M99
 L X+30 Y+10 FMAX M99
-L X+50 Y+10 FMAX M99
 ```
 
-Heidenhain also supports milling cycles that G-code controllers typically don't have as canned cycles:
+| IR cycle_type | Heidenhain |
+|---|---|
+| `drill` | `CYCL DEF 200` |
+| `peck_drill` | `CYCL DEF 203` |
+| `bore` | `CYCL DEF 201` |
+| `tap` | `CYCL DEF 207` |
+| `contour_pocket` | `CYCL DEF 251`/`252`/`273` |
+| `face_mill` | `CYCL DEF 232` |
 
-| IR cycle_type | Heidenhain CYCL DEF |
-|---------------|---------------------|
-| `drill` | `CYCL DEF 200 DRILLING` |
-| `peck_drill` | `CYCL DEF 203 UNIVERSAL DRILLING` |
-| `spot_drill` | `CYCL DEF 200 DRILLING` |
-| `bore` | `CYCL DEF 201 REAMING` |
-| `tap` | `CYCL DEF 207 RIGID TAPPING` |
-| `contour_pocket` | `CYCL DEF 251 RECTANGULAR POCKET` / `CYCL DEF 252 CIRCULAR POCKET` / `CYCL DEF 273 OCM POCKET` |
-| `contour_profile` | `CYCL DEF 25 CONTOUR TRAIN` / `CYCL DEF 270 CONTOUR DATA` |
-| `face_mill` | `CYCL DEF 232 FACE MILLING` |
-
-**Heidenhain contour cycles** are particularly powerful — they can reference a contour definition (defined with `CYCL DEF 270 CONTOUR DATA` + `CYCL DEF 271 OCM CONTOUR DATA`) and the controller handles roughing, finishing, and depth stepping internally. When the user selects controller cycles for a pocket/profile on a Heidenhain machine, the post-processor can emit the contour definition + cycle call instead of thousands of explicit moves.
-
-### Operation-Level Cycle Control
-
-Operations have an optional `use_canned_cycle` field:
-
-```rust
-pub struct Operation {
-    // ...existing fields...
-    pub use_canned_cycle: bool,  // Default: false. When true, compiler emits cycle blocks
-                                 // if the post-processor supports the relevant cycle type.
-}
-```
-
-When `use_canned_cycle` is `true`:
-1. The compiler checks if the post-processor supports the relevant cycle type
-2. If supported: emits `CycleDefine` + `CycleCall` blocks
-3. If not supported: falls back to explicit moves (same as `use_canned_cycle=false`)
-
-This gives the user explicit control — they can choose whether the CAM or the controller handles the pattern, and the system gracefully degrades when the target controller doesn't support the cycle.
-
-### Implementation Phases for Cycles
-
-Canned cycle support is planned for later phases:
-- **Drilling cycles** (G81/G83, CYCL DEF 200/203): Implemented alongside drill operations in Phase 4
-- **Heidenhain milling cycles** (CYCL DEF 251/252/273): Phase 5+, since they require contour definition output and are tightly coupled to the Heidenhain post-processor
+---
 
 ## Optional Operations
 
-Operations can be marked `optional=true` so the machine operator can skip them at runtime without editing the NC program. This is common for finishing passes, deburring, engraving, or chamfering that may not be needed on every part.
+Operations can be marked `optional=true` so the operator can skip them at runtime without editing the NC program.
 
-### Skip Levels
-
-Each optional operation has a `skip_level` (1-9). Operations with the same skip level are skipped together. This lets the operator control groups independently:
+Each optional operation has a `skip_level` (1–9). Operations with the same skip level are skipped together.
 
 | skip_level | Typical use |
 |---|---|
 | 1 | Finishing passes |
 | 2 | Chamfer / deburring |
 | 3 | Engraving / marking |
-| 4-9 | User-defined |
+| 4–9 | User-defined |
 
-### How Post-Processors Implement It
+### Strategy 1: Block Delete (`/`)
 
-The NC compiler wraps optional operations in `OptionalSkipStart` / `OptionalSkipEnd` blocks. Each post-processor translates these to its native skip mechanism.
+Every line within the optional section is prefixed with `/` (or `/2`, `/3`, etc.). The operator toggles the hardware switch on the controller panel.
 
-#### Strategy 1: Block Delete (`/`)
-
-The simplest and most portable approach. Every line within the optional section is prefixed with `/` (or `/2`, `/3`, etc. for multi-level). The operator toggles the "block delete" switch on the controller panel.
-
-**Supported by**: Virtually all controllers (Fanuc, LinuxCNC, Haas, Grbl, Sinumerik, Heidenhain)
-
-**Limitation**: On basic controllers, there's only one block delete switch — all `/` lines are either skipped or not. Controllers with multi-level block delete (`/1` through `/9`) can skip levels independently, which maps perfectly to our `skip_level`.
-
-**Fanuc / LinuxCNC / Haas**:
 ```gcode
 (Optional: Finish profile - Block delete level 1)
-/ N0200 T2 M6 (3mm finish end mill)
+/ N0200 T2 M6
 / N0210 S24000 M3
 / N0220 G0 X0 Y0
-/ N0230 G0 Z5.000
-/ N0240 G41 D02
-/ N0250 G1 X10.000 Y0 Z-10.000 F600.000
+/ N0230 G41 D02
 ...
 / N0300 G40
 / N0310 M5
 ```
 
-With multi-level block delete (Haas, some Fanuc):
-```gcode
-/2 N0200 T2 M6 (chamfer mill)
-/2 N0210 S12000 M3
-...
-```
+Multi-level (Haas, Sinumerik): `/2 N0200 T2 M6`
 
-**Grbl**:
-```gcode
-; Optional: Finish profile (toggle block delete to skip)
-/ G0 X0 Y0
-/ G0 Z5
-/ G1 X10 Y0 Z-10 F600
-...
+The post-processor's `M.optional_skip_strategy` field controls which strategy is used. Block delete is the default.
+
+### Strategy 2: Labels + Conditional Jumps
+
+More flexible — the operator sets a variable to control which operations run.
+
+**Heidenhain**:
 ```
-Grbl supports single-level `/` only.
+FN 9: IF +Q1 EQU +0 GOTO LBL 10
+50 TOOL CALL 2 Z S24000
+...
+LBL 10
+```
 
 **Sinumerik**:
 ```gcode
-; Optional: Finish profile
-/1 N200 T2 M6
-/1 N210 S24000 M3
-...
-```
-Sinumerik supports `/1` through `/8`.
-
-**Heidenhain**:
-Heidenhain also supports `/` block delete:
-```
-/ 50 TOOL CALL 2 Z S24000
-/ 51 L X+0 Y+0 FMAX M3
-/ 52 L X+10 Y+0 Z-10 F600 RL
-...
-```
-
-#### Strategy 2: Labels + Conditional Jumps
-
-More flexible than block delete — the operator sets a variable (parameter/Q-parameter/R-parameter) to control which operations run. This allows runtime decisions without a hardware switch, and works well on controllers with limited block delete levels.
-
-The post-processor declares which strategy it prefers via a property:
-
-```python
-class PostProcessor(ABC):
-    # ...existing methods...
-
-    @property
-    def optional_skip_strategy(self) -> str:
-        """
-        How to implement optional operation skipping.
-        "block_delete": Use / prefix (default, most portable)
-        "jump": Use labels and conditional jumps (more flexible)
-        "both": Emit both / prefix and jump structure (belt and suspenders)
-        """
-        return "block_delete"
-```
-
-**Heidenhain** (jump strategy):
-```
-; Check Q parameter — Q1=0 means skip finishing
-FN 9: IF +Q1 EQU +0 GOTO LBL 10
-50 TOOL CALL 2 Z S24000
-51 L X+0 Y+0 FMAX M3
-52 L X+10 Y+0 Z-10 F600 RL
-...
-59 L Z+25 FMAX
-LBL 10
-```
-The operator sets `Q1=1` to run the finishing pass, `Q1=0` to skip it. This can be done from the controller panel or via a program header section.
-
-**Sinumerik** (jump strategy):
-```gcode
-; R1=0 to skip finishing
 IF R1==0 GOTOF SKIP_FINISH
 N200 T2 M6
-N210 S24000 M3
 ...
-N300 M5
 SKIP_FINISH:
 ```
 
-**LinuxCNC** (jump strategy using O-codes):
+**LinuxCNC** (O-codes):
 ```gcode
-; #<_skip_finish> = 0 to skip
 O100 IF [#<_skip_finish> EQ 0]
   O100 GOTO 999
 O100 ENDIF
 N200 T2 M6
 ...
-O999 (skip target)
+O999
 ```
 
-**Fanuc Macro B** (jump strategy):
-```gcode
-(Skip finishing if #500 = 0)
-IF [#500 EQ 0] GOTO 100
-N200 T2 M6
-N210 S24000 M3
-...
-N100 (skip target)
-```
+### Safety
 
-#### Strategy Comparison
+The compiler inserts a safe Z retract before `OptionalSkipStart`. After `OptionalSkipEnd`, it cancels compensation (`G40`) and rapids to safe Z — regardless of whether the section ran.
 
-| Aspect | Block delete (`/`) | Conditional jump |
-|---|---|---|
-| Portability | Universal | Controller-specific syntax |
-| Multi-level | Limited (1-9 depending on controller) | Unlimited (one variable per operation) |
-| Runtime control | Hardware switch on panel | Set variable value |
-| Program readability | Lines visually marked with `/` | Clear IF/GOTO structure |
-| Nesting | Not possible | Possible (nested IFs) |
-| Grbl support | Yes (single level) | No |
-
-**Default**: Block delete is the default strategy for all post-processors. Jump strategy is an option on controllers that support it (Heidenhain, Sinumerik, LinuxCNC, Fanuc Macro B). The user can choose per-export in the export dialog.
-
-### Compiler Behavior
-
-When the compiler encounters an operation with `optional == true`:
-
-1. Emit `OptionalSkipStart` block with `skip_level` and a label name derived from the operation name
-2. Emit all the operation's NCBlocks (tool change, spindle, toolpath, etc.)
-3. Emit `OptionalSkipEnd` block
-
-The post-processor's `format_blocks()` method handles these:
-- For block delete: sets an internal flag, prefixes subsequent lines with `/N` until `OptionalSkipEnd`
-- For jumps: emits the conditional jump + label pair
-
-### Safety Considerations
-
-Skipping an operation at the machine must leave the machine in a safe state:
-
-- The compiler inserts a **safe Z retract** before `OptionalSkipStart` so the tool is clear regardless of whether the section runs
-- After `OptionalSkipEnd`, the compiler re-establishes state: cancels any compensation (`G40`), cancels any active cycle (`G80`/`CYCL OFF`), rapids to safe Z
-- If the skipped operation included a tool change, the next operation must handle the fact that the tool may or may not have been changed — the compiler inserts a redundant `ToolChange` after the optional section if needed
+---
 
 ## Example Output
 
-Given a simple facing operation on a 100x80mm stock, the LinuxCNC post-processor would generate:
+LinuxCNC output for a simple facing operation on 100×80mm stock:
 
 ```gcode
 %
-(CAMproject - My Part)
-(Generated: 2026-03-20)
+(My Part)
+(Generated: 2026-03-21)
 G90 G94 G17
 G21
 G54

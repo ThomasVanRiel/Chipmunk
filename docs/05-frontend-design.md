@@ -1,5 +1,7 @@
 # Frontend Design
 
+> **DEFERRED** — The frontend is not being built in the current phases. CLI is the primary interface. See `tasks/backlog.md` for design notes on the deferred frontend. This document is kept for future reference.
+
 ## Overview
 
 The frontend is a single-page application using Three.js for 3D visualization and vanilla TypeScript for UI logic. No heavy framework (React/Vue/Svelte) — the UI is simple enough that direct DOM manipulation keeps the bundle small and avoids framework churn.
@@ -98,6 +100,31 @@ toolpathLines: THREE.Group          // Toolpath visualization
 - **Click edge**: Select an edge for profile operations
 - **Click toolpath segment**: Highlight and show info (position, feed, move type)
 - **Right-click**: Context menu (add operation on selected face, set as top, set WCS here)
+
+### Selection Implementation
+
+The part is represented by two overlapping Three.js objects loaded from the single `/mesh` response:
+
+**Face mesh** (`THREE.Mesh`):
+- `BufferGeometry` with `position`, `normal`, `index` attributes
+- Custom `faceId` attribute (one value per triangle) for face identification
+- `MeshPhongMaterial` — light gray, slightly transparent
+
+**Edge lines** (one `THREE.LineSegments` per edge, grouped):
+- Each edge's `points` polyline becomes a `BufferGeometry` line
+- Each `LineSegments` object stores its `edge_id` in `userData.edgeId`
+- `LineBasicMaterial` — dark gray at rest, highlighted color on hover/select
+- Hidden by default; shown only when the active operation type supports edge selection
+
+**Hit testing order** (on each click/hover):
+1. Raycast against edge group first (with `linePrecision` ~= 0.5mm). If hit → edge selected.
+2. If no edge hit, raycast against face mesh. Triangle index → `faceId` attribute → face selected.
+
+**Face highlight**: Build a secondary `THREE.Mesh` from only the triangles belonging to the selected `face_id`. Render with `polygonOffset` to avoid z-fighting. Orange material, no depth write.
+
+**Edge highlight**: Change the hit `LineSegments` material color. Render a slightly thicker line by swapping to a wider `LineBasicMaterial` (or use `Line2` from `three/addons` for true thick lines).
+
+**Selection mode**: The active operation type determines what is selectable. When no operation is selected, face selection is active. When a profile operation is selected and "pick geometry" is clicked, edge selection becomes active. The two modes use the same raycast infrastructure — only which hits are acted on changes.
 
 ## Sidebar Panels
 

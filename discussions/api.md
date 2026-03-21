@@ -80,7 +80,7 @@ These endpoints are listed in the route table but have no request/response examp
 
 ### 1.6 Health / readiness endpoint
 
-No `GET /api/health`. The frontend needs backend liveness detection (especially during startup when PyO3/Python init may be slow). Also useful for the Vite dev proxy.
+No `GET /api/health` in the original draft. A health endpoint is useful for API server liveness detection and future scripting/frontend use. Post-processors are Lua-based (no Python interpreter to initialize) so startup is fast.
 
 **Decision**:
 > Include full status

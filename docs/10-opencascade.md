@@ -113,7 +113,7 @@ GeomAbs_BSplineSurface → SurfaceType::BSpline
 _                  → SurfaceType::Other
 ```
 
-### `core/geometry.rs` — Tessellation
+### `core/geometry.rs` — Tessellation (Face Mesh)
 
 ```
 BRepMesh_IncrementalMesh(shape, deflection)   → compute mesh
@@ -127,7 +127,28 @@ location.IsIdentity() / location.Transformation() → apply face transform
 
 `BRepMesh_IncrementalMesh` is **covered**. `BRep_Tool::Triangulation` and `Poly_Triangulation` access may need custom bindings — check crate coverage.
 
-Face index tracking for frontend selection: as faces are iterated with `TopExp_Explorer`, assign a sequential `face_id`. The same iteration order must be used consistently (since `TopExp_Explorer` order is deterministic for a given shape). Store the `face_id → TopAbs_Shape` mapping in `PartGeometry::faces`.
+Face index tracking: as faces are iterated with `TopExp_Explorer`, assign a sequential `face_id`. The same iteration order must be used consistently (`TopExp_Explorer` order is deterministic for a given shape). Store the `face_id → TopAbs_Shape` mapping in `PartGeometry::faces`.
+
+### `core/geometry.rs` — Edge Tessellation
+
+Edges are tessellated separately to populate `SelectionMesh::edges`, enabling edge picking in the frontend.
+
+```
+TopExp_Explorer(shape, TopAbs_EDGE)           → iterate edges, assign sequential edge_id
+BRepAdaptor_Curve(edge)                       → adapt edge as a parametric curve
+GCPnts_TangentialDeflection(adaptor,
+    angular_deflection, curvature_deflection)  → compute parameter values for tessellation
+adaptor.Value(t)                               → evaluate curve at parameter t → gp_Pnt
+location = BRep_Tool::Location(edge)           → edge location transform (apply to points)
+```
+
+Use the **same `deflection` value** as the face tessellation so edge density is visually consistent with the mesh. `GCPnts_TangentialDeflection` automatically adds more points on tight curves (arcs, splines) and fewer on straight lines — a straight edge produces exactly two points.
+
+Edge iteration order with `TopExp_Explorer(shape, TopAbs_EDGE)` is deterministic for a given `TopoDS_Shape`, consistent with face iteration. The `edge_id` is the sequential index from this traversal.
+
+**Shared vertices**: Edges share vertex positions with the face mesh — no need to deduplicate. The edge `points` array is independent of the vertex buffer; the frontend renders them as a separate `LineSegments` object.
+
+`BRepAdaptor_Curve` and `GCPnts_TangentialDeflection` coverage needs to be verified against the crate (see [Binding Coverage Checklist](#binding-coverage-checklist)).
 
 ### `core/geometry.rs` — Transforms
 
@@ -347,8 +368,8 @@ Before implementing each module, verify which APIs are already covered by `openc
 | `BRepAdaptor_Surface` | core/geometry | ✓ | Surface type enum |
 | `gp_Trsf` / `BRepBuilderAPI_Transform` | core/geometry | ✓ | Shape transform |
 | `BRepAlgoAPI_Section` | toolpath/slicer | ✓ | B-rep sectioning |
-| `BRepAdaptor_Curve` | toolpath/slicer | ? | Arc type detection |
-| `GCPnts_TangentialDeflection` | toolpath/slicer | ? | Arc tessellation |
+| `BRepAdaptor_Curve` | toolpath/slicer, core/geometry | ? | Arc type detection + edge tessellation |
+| `GCPnts_TangentialDeflection` | toolpath/slicer, core/geometry | ? | Arc tessellation + edge polyline sampling |
 | `BRepOffsetAPI_MakeOffset` | toolpath/offset | ✓ | Wire offset |
 | `BRepBuilderAPI_MakeEdge` | io/dxf_reader | ? | Edge from curve |
 | `BRepBuilderAPI_MakeWire` | io/dxf_reader | ? | Wire from edges |

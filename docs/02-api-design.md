@@ -105,17 +105,30 @@ file: <binary>
 ```
 
 #### `GET /api/project/parts/{id}/mesh`
-Returns mesh data optimized for Three.js BufferGeometry.
+Returns the full selection mesh for Three.js: triangle data for face rendering/picking, plus edge polylines for edge rendering/picking.
+
 ```json
 // Response 200 (Accept: application/json)
 {
   "vertices": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, ...],
   "normals": [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, ...],
-  "indices": [0, 1, 2, ...]
+  "indices": [0, 1, 2, ...],
+  "face_ids": [0, 0, 0, 1, 1, 2, ...],
+  "edges": [
+    { "edge_id": 0, "points": [0.0, 0.0, 0.0, 10.0, 0.0, 0.0] },
+    { "edge_id": 1, "points": [10.0, 0.0, 0.0, 10.0, 5.0, 0.0, 9.5, 5.3, 0.0, ...] },
+    ...
+  ]
 }
 ```
 
-**Binary format** (future optimization): For large meshes, the client can request `Accept: application/octet-stream` to receive packed little-endian float32 arrays instead of JSON. The response body is: `[u32 vertex_count][u32 index_count][f32 vertices...][f32 normals...][u32 indices...]`. This avoids the ~3x size overhead of JSON-encoding floats. Not needed for v1 — JSON is fine for typical hobby/small-shop part sizes.
+All arrays are flat (`[x0,y0,z0, x1,y1,z1, ...]`), matching Three.js `BufferAttribute` layout directly. `face_ids` has one entry per triangle (length = `indices.length / 3`). Each edge's `points` is a tessellated polyline — straight edges have two points, arcs and splines have more. Edge tessellation uses the same deflection parameter as the triangle mesh so visual density is consistent.
+
+**Face selection**: raycast against the triangle mesh → triangle index → `face_ids[triangleIndex]` → B-rep face.
+
+**Edge selection**: Three.js `Raycaster` with `linePrecision` set to ~0.5mm (world units, scales with zoom) raycasts against a `LineSegments` object per edge → `edge_id`. The frontend builds one `LineSegments` per edge (or uses a multi-segment approach with per-point `edge_id` attributes) so a hit can be mapped back to the correct `edge_id`.
+
+**Binary format** (future optimization): For large meshes, the client can request `Accept: application/octet-stream` to receive a packed binary layout instead of JSON. Not needed for v1 — JSON is sufficient for typical part sizes.
 
 #### `POST /api/project/parts/{id}/update`
 Upload new geometry to preview changes before applying. The update is NOT applied — the response is a change report for the user to review. See `09-part-update.md` for the full pipeline.
@@ -528,17 +541,14 @@ Returns server status including subsystem readiness. The frontend polls this on 
 {
   "status": "ok",
   "version": "0.1.0",
-  "python": {
-    "status": "ok",
-    "postprocessors_loaded": 6
-  },
+  "postprocessors_loaded": 6,
   "project_loaded": true
 }
 ```
 
-If Python/PyO3 is still initializing, `python.status` is `"initializing"`. If it failed, `"error"` with a `detail` field. The frontend can show a loading indicator until all subsystems report `"ok"`.
+`postprocessors_loaded` is the count of available post-processors (built-in + discovered from config directory). Post-processors are Lua modules embedded at compile time — no runtime initialization delay.
 
-## Future: Simulation (Phase 5)
+## Future: Simulation (Deferred)
 
 These endpoints are defined as contracts for future implementation. They are **not** part of v1.
 
@@ -596,11 +606,13 @@ These endpoints will be specified in detail when implementation begins.
 
 ## Static File Serving
 
-The axum server serves the frontend as static files in production:
+> **Deferred** — The frontend is not being built in Phases 1–4. See `tasks/backlog.md`.
+
+When a frontend is built, the axum server would serve it as static files in production:
 - `GET /` → `frontend/dist/index.html`
 - `GET /assets/*` → `frontend/dist/assets/`
 
-In development, the frontend dev server (Vite on `:5173`) runs separately and proxies `/api` requests to the axum backend (`:8000`).
+In development, the frontend dev server (Vite on `:5173`) would proxy `/api` requests to the axum backend (`:8000`). For now, `camproject serve` exposes the API only.
 
 ## Pagination
 

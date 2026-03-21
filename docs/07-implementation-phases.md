@@ -1,340 +1,307 @@
 # Implementation Phases
 
-The project starts with 2.5D (DXF/SVG → toolpaths → NC code), then layers 3D support on top. This order makes sense because:
+Entirely CLI-driven. The complete 2.5D workflow (drilling + milling) is usable without a frontend. The browser UI and 3D project support are deferred to the backlog — the tool is useful without them.
 
-- The backend toolpath pipeline is identical for 2D and 3D inputs (everything works on 2D contours at Z depths)
-- The 2D frontend (top-down view with pan/zoom) is much simpler than a full Three.js 3D viewport
-- OpenCascade is used lightly at first (wire/face operations) before the heavy STEP reader and tessellation
-- Covers the most common hobby CNC workflow: DXF from Inkscape/LibreCAD → profile/pocket → G-code
-- NC generation, post-processors, and the full export pipeline are exercised from Phase 2
+Core philosophy:
+- **Get real hardware feedback early** — Heidenhain is the target machine; it should be the first post-processor.
+- **Simplest complete workflow first** — manual drilling (XY + quill confirmation) before automatic cycles, before milling.
+- **One SVG + one YAML = one job** — SVG stroke colors map to operations; the YAML file configures each color. No GUI required to select contours.
 
 ---
 
-## Phase 1: Scaffolding + 2.5D Geometry Display
+## Phase 1: Scaffolding + SVG/DXF Import
 
-**Goal**: A running application where you can upload a DXF or SVG file and view its 2D geometry in a top-down viewport in the browser.
+**Goal**: Backend running, SVG and DXF import working, project save/load. Validated via health check and test suite.
 
 ### Backend Tasks (Rust)
 
 1. **Project scaffolding**
-   - Create `Cargo.toml` with dependencies (axum, tokio, serde, opencascade-rs, geo)
-   - Create `src/main.rs` entry point, `src/lib.rs` module declarations
-   - Set up axum app with CORS config, static file serving
-   - `GET /api/health` — health check with subsystem status
+   - `Cargo.toml` with all dependencies (axum, tokio, serde, opencascade-rs, geo, geo-clipper, mlua, serde_yaml, uuid, chrono, tracing, anyhow, thiserror, clap)
+   - `src/main.rs` — entry point, clap subcommand dispatch
+   - `src/lib.rs` — module declarations
+   - `GET /api/health` — health check
 
 2. **Core data model (minimal)**
-   - `core/project.rs`: `Project` struct with `ProjectType::TwoHalfD`
-   - `core/geometry.rs`: `PartGeometry` wrapping `TopoDS_Shape` (wires/faces for 2D), `FaceInfo`, `SurfaceType`, `BoundingBox`
-   - `core/units.rs`: `Units` enum
+   - `core/units.rs`: `Units` enum (Mm, Inch)
+   - `core/geometry.rs`: `PartGeometry` wrapping `TopoDS_Shape`, `BoundingBox`
+   - `core/project.rs`: `Project` struct, `ProjectType::TwoHalfD`
 
-3. **DXF import**
-   - `io/dxf_reader.rs`: Parse DXF via OpenCascade, produce `TopoDS_Wire` / `TopoDS_Face`
-   - Handle lines, arcs, polylines, circles, splines
+3. **SVG import** — primary input format
+   - `io/svg_reader.rs`: Parse SVG paths into `TopoDS_Wire` / `TopoDS_Face`
+   - **Preserve stroke color per entity** — stored alongside geometry for operation mapping
+   - Circles → `TopoDS_Vertex` at center + radius metadata (for drill point extraction)
    - Closed paths → faces; open paths → wires
 
-4. **SVG import**
-   - `io/svg_reader.rs`: Parse SVG paths via OpenCascade, produce wires/faces
-   - Same closed/open path distinction as DXF
+4. **DXF import** — secondary input format
+   - `io/dxf_reader.rs`: Parse DXF via OpenCascade → wires/faces
+   - Preserve entity color (ACI or RGB) per entity
 
 5. **B-rep persistence**
-   - `io/brep_io.rs`: Save/load `.brep` files (OpenCascade native format)
-   - `io/project_file.rs`: Save/load `.camproj` JSON with `brep_file` references
+   - `io/brep_io.rs`: save/load `.brep`
+   - `io/project_file.rs`: `.camproj` JSON
 
-6. **API endpoints (minimal)**
-   - `POST /api/project` — create 2.5D project
-   - `GET /api/project` — get project state
-   - `POST /api/project/parts` — upload DXF/SVG file (multipart)
-   - `GET /api/project/parts` — list parts
-   - `GET /api/project/parts/{id}` — part metadata
-   - `GET /api/project/parts/{id}/contour` — get 2D geometry for rendering
-   - `GET /api/project/download` — download .camproj
-   - `POST /api/project/load` — load .camproj
-   - `GET /api/project/history` — undo/redo stack
-   - `POST /api/project/undo` / `POST /api/project/redo`
-
-### Frontend Tasks
-
-7. **Frontend scaffolding**
-   - `package.json` with TypeScript, Vite (no Three.js yet — 2D only)
-   - `vite.config.ts` with API proxy to axum backend
-   - `index.html` with layout structure
-
-8. **2D Viewport**
-   - Canvas or SVG-based top-down view
-   - Render wires as lines/arcs, faces as filled regions
-   - Pan and zoom controls
-   - Grid with origin axes
-
-9. **Basic UI**
-   - Toolbar with "Open File" button (DXF/SVG upload)
-   - Status bar showing part info (bounding box, entity count)
-   - `api.ts`: REST client for backend communication
+6. **REST API (minimal)**
+   - `POST /api/project`, `GET /api/project`
+   - `POST /api/project/parts` — multipart upload SVG/DXF
+   - `GET /api/project/parts`, `GET /api/project/parts/{id}`
+   - `GET /api/project/download`, `POST /api/project/load`
 
 ### Tests
 
-10. **Backend tests**
-    - `test_geometry.rs`: PartGeometry creation, bounding box, face enumeration
-    - `test_dxf_reader.rs`: DXF rectangle → expected wire geometry
-    - `test_svg_reader.rs`: SVG circle → expected face geometry
-    - `test_brep_io.rs`: Save and reload .brep roundtrip
-    - `test_api.rs`: File upload, contour retrieval (using axum-test)
-    - Test fixtures: `rectangle.dxf`, `circle.svg`, `profile_with_arcs.dxf`
+7. `test_svg_reader.rs` — circle, rectangle, open path; stroke color preserved
+   `test_dxf_reader.rs` — lines, arcs, circles; entity color preserved
+   `test_brep_io.rs` — save + reload roundtrip
+   `test_api.rs` — file upload returns correct bounding box
 
 ### Deliverable
 
-User runs `cargo run`, opens `localhost:8000` in browser, uploads a DXF, sees the 2D geometry rendered top-down with pan/zoom and a grid/axes reference. Project save/load works.
+`cargo run -- serve` starts. SVG/DXF upload returns geometry metadata with colors. All tests pass.
 
 ---
 
-## Phase 2: 2.5D Toolpath Operations
+## Phase 2: Manual Drill + Heidenhain Export (CLI)
 
-**Goal**: Define tools, setups, stock, and machining operations. Generate and visualize toolpaths on 2D geometry.
+**Goal**: First complete end-to-end workflow via CLI. SVG circles → drill points → Heidenhain NC → run on machine.
 
-### Backend Tasks (Rust)
-
-1. **Tool definitions**
-   - `core/tool.rs`: `Tool` (with `tool_number`, `machine`), `ToolType`, `ToolLibrary`
-   - Tool CRUD API: project tools + global library + import/export
-
-2. **Setup framework**
-   - `core/setup.rs`: `Setup` struct (WCS, stock, clearance height)
-   - Setup CRUD API endpoints
-   - WCS inheritance to child operations
-
-3. **Stock setup**
-   - Stock definition on setup (box or cylinder)
-   - Auto-suggest stock from part bounding box
-
-4. **Operation framework**
-   - `core/operation.rs`: `Operation` struct with `setup_id`, type-specific params, `pocket_entry`
-   - Operation CRUD API: create, update, delete, reorder, duplicate, get by ID
-   - Setup/WCS/stock/clearance inheritance with per-operation override
-
-5. **Polygon offset**
-   - `toolpath/offset.rs`: `offset_polygon()`, `iterative_offset()` using geo-clipper
-   - Convert OpenCascade wires/edges → `geo::MultiPolygon` for offset operations
-
-6. **Depth strategy**
-   - `toolpath/depth_strategy.rs`: `compute_depth_passes()`
-
-7. **Facing generator**
-   - `toolpath/facing.rs`: Zigzag raster pattern across stock top
-
-8. **Profile generator**
-   - `toolpath/profile.rs`: Contour following with inside/outside/on-line
-   - Lead-in arc support
-   - CAM mode (polygon offset) and Controller mode (exact geometry, arcs preserved)
-   - Tab support for sheet cutting
-
-9. **Pocket generator**
-   - `toolpath/pocket.rs`: Contour-parallel and zigzag strategies
-   - Entry type: plunge, helix, ramp
-
-10. **Toolpath API**
-    - `POST /api/project/operations/{id}/generate` — trigger generation (async)
-    - `POST /api/project/operations/generate-all`
-    - `GET /api/project/operations/{id}/toolpath` — get toolpath data (with `start_position`)
-    - WebSocket: progress, completion, error, cancel
-
-### Frontend Tasks
-
-11. **Operations panel**: List, add, delete, reorder, duplicate operations (grouped by setup)
-12. **Properties panel**: Edit operation parameters, setup inheritance indicators
-13. **Setup panel**: Setup CRUD, WCS/stock/clearance height editing
-14. **Tools panel**: Tool library CRUD with tool number and machine fields
-15. **Stock setup dialog**: Define stock dimensions per setup
-16. **Toolpath visualization**: Render toolpath lines in 2D viewport (rapid=red dashed, feed=blue, plunge=green)
-
-### Tests
-
-17. **Toolpath tests**
-    - `test_offset.rs`: Square offset inward/outward → expected dimensions
-    - `test_facing.rs`: Facing on stock → expected zigzag pattern
-    - `test_profile.rs`: Square profile → expected offset contour, arc preservation in controller mode
-    - `test_pocket.rs`: Square pocket → expected offset loops, helix entry
-    - `test_depth_strategy.rs`: Depth pass computation
-
-### Deliverable
-
-User can create setups, define stock, add tools, create facing/profile/pocket operations on DXF/SVG geometry, generate toolpaths, and see them visualized over the 2D geometry.
-
----
-
-## Phase 3: NC Code Generation + Export
-
-**Goal**: Export machine-ready NC code through pluggable post-processors. Complete end-to-end workflow for 2.5D projects.
+Target output (three holes, quill confirmation):
+```
+BEGIN PGM DRILL MM
+BLK FORM 0.1 Z X+0.000 Y+0.000 Z-50.000
+BLK FORM 0.2 X+100.000 Y+100.000 Z+0.000
+TOOL CALL 1 Z S2000
+L Z+5.000 FMAX M3
+L X+25.000 Y+15.000 FMAX
+STOP
+L X+75.000 Y+15.000 FMAX
+STOP
+L X+75.000 Y+65.000 FMAX
+STOP
+L Z+50.000 FMAX M5
+END PGM DRILL MM
+```
 
 ### Backend Tasks
 
-1. **NC intermediate representation** (Rust)
-   - `nc/ir.rs`: `NCBlock`, `BlockType` enum
-   - `nc/compiler.rs`: `compile_program()` — operations → NCBlock list
-   - Setup-aware compilation: clearance retractions between setups
+1. **Core types** — `Tool`, `Setup` (WCS origin, clearance height), `Operation`, `DrillParams`
+2. **Drill toolpath** — `DrillOperation`: extract circle centers from geometry → `Vec<DrillPoint>`
+3. **`OperationType` trait** — `toolpath/registry.rs`
+4. **NC IR** — `nc/ir.rs`: `RapidMove`, `ProgramStop`, `SpindleOn/Off`, `ToolChange`, `ProgramEnd`
+5. **NC compiler** — `nc/compiler.rs`: tool call → spindle → clearance → points with STOP → end
+6. **mlua bridge** — `nc/bridge.rs`: fresh Lua VM per call, load base.lua + post-processor, call `M.generate()`
+7. **Post-processor registry** — `nc/postprocessors/mod.rs`: `BUILTIN_POSTPROCESSORS` array
+8. **`postprocessors/base.lua`** — `M.fmt()`, `M.hh_coord()` (explicit sign)
+9. **`postprocessors/heidenhain.lua`** — manual drill mode: header, `L X+n Y+n FMAX` + `STOP` per point, footer
 
-2. **PyO3 bridge** (Rust)
-   - `nc/bridge.rs`: NCBlock Rust → Python conversion, post-processor discovery and invocation
+### CLI
 
-3. **Post-processor framework** (Python)
-   - `postprocessors/src/camproject_post/base.py`: `PostProcessor` ABC, `ProgramContext`, Python `NCBlock`
-   - Entry-point based plugin discovery
-   - `tool_call_by_name` option for Heidenhain
+```bash
+# From SVG — extract circle centers from all circles
+camproject drill holes.svg --tool-number 1 --tool-name "Drill 6mm" --diameter 6 \
+  --spindle-speed 1500 --clearance 5 --postprocessor heidenhain --output DRILL.H
 
-4. **Built-in post-processors** (Python)
-   - `linuxcnc.py`, `grbl.py`, `marlin.py`, `generic_fanuc.py`
+# Filter by stroke color (for SVGs with mixed content)
+camproject drill part.svg --color "#00ff00" --tool-number 1 ...
 
-5. **Export API** (Rust)
-   - `GET /api/postprocessors` — list available (calls PyO3 bridge)
-   - `POST /api/project/export/preview` — preview NC code (with `setup_id` filter)
-   - `POST /api/project/export` — download NC file
-   - `POST /api/project/operations/{id}/export/preview` — single-operation shortcut
+# Explicit coordinates
+camproject drill --at 25,15 --at 75,15 --at 75,65 --tool-number 1 ...
 
-6. **Undo/redo**
-   - `CommandHistory` with JSON patches
-   - `POST /api/project/undo`, `POST /api/project/redo`
-
-### Frontend Tasks
-
-7. **NC preview panel**: Syntax-highlighted NC code display with post-processor dropdown
-8. **Export dialog**: Post-processor selection, setup/operation filter, download
-9. **Undo/redo buttons**: Tooltips from history API, keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z)
+# List post-processors
+camproject postprocessors
+```
 
 ### Tests
 
-10. **NC tests**
-    - `test_nc_compiler.rs`: Simple toolpath → expected NCBlocks, setup retraction handling
-    - `test_postprocessors.py`: NCBlocks → expected G-code for each post-processor
-    - Round-trip: known DXF geometry → toolpath → NC code → verify against reference output
+10. `test_drill.rs`, `test_nc_compiler.rs`
+    Golden file: `tests/fixtures/nc/heidenhain_manual_drill.H`
+    Fixture: `tests/fixtures/holes.svg`
 
 ### Deliverable
 
-Complete 2.5D workflow: import DXF/SVG → define operations → generate toolpaths → preview and export NC code for LinuxCNC, Grbl, Marlin, or Fanuc controllers. This is the first **usable release** for hobby CNC users.
+`camproject drill holes.svg --postprocessor heidenhain --output DRILL.H` → load on Heidenhain TNC → quill drill workflow works.
 
 ---
 
-## Phase 4: Drill Cycles + Advanced Post-Processors
+## Phase 3: Automatic Drill Cycles + Per-Program Export
 
-**Goal**: Drilling operations, canned cycle support, and Sinumerik/Heidenhain post-processors.
+**Goal**: Native canned cycles. Per-tool NC file export for no-tool-changer machines.
 
-### Tasks
+### No-Tool-Changer Workflow
 
-1. `toolpath/drill.rs`: Drill cycle generation (simple, peck, spot, bore, tap)
-2. Dual output: explicit moves (universal) + `CycleDefine`/`CycleCall` blocks (for controllers that support them)
-3. `sinumerik.py` post-processor: Sinumerik-specific formatting, `/1`-`/8` block delete, conditional jumps
-4. `heidenhain.py` post-processor: Full conversational format override, `TOOL CALL` by name, `BLK FORM`, `CYCL DEF`
-5. Optional operations: block delete (`/` prefix) and conditional jump strategies
-6. Cutter compensation in NC output: `G41`/`G42` for G-code, `RL`/`RR` for Heidenhain
+Z=0 is set at the **tool tip** before each program. No tool length compensation needed:
 
-### Tests
-
-7. `test_drill.rs`: Drill point generation, peck cycle parameters
-8. `test_sinumerik.py`, `test_heidenhain.py`: NC output verification against reference
-
-### Deliverable
-
-User can create drill operations, use canned cycles on supporting controllers, and export to Sinumerik and Heidenhain TNC.
-
----
-
-## Phase 5: 3D Projects (STEP/STL + 3D Viewport)
-
-**Goal**: Add 3D project support — STEP/STL import, B-rep solids, Three.js 3D viewport, face selection.
+```
+Load center drill → touch off Z at tip → run T1_CENTER_DRILL.H
+Load Ø6 drill    → touch off Z at tip → run T2_DRILL_6.H
+```
 
 ### Backend Tasks
 
-1. **STEP import**
-   - `io/step_reader.rs`: STEP → `TopoDS_Shape` via OpenCascade `STEPControl_Reader`
-   - Extract `FaceInfo` metadata from the B-rep
+1. **Full DrillParams** — peck depth, chip-break, dwell, retract plane, `DrillStrategy` enum, `use_canned_cycle` flag
+2. **Explicit Z move fallback** — drill toolpath always generates explicit moves; `compile_nc` hook emits cycles when supported
+3. **`compile_nc` hook** — `DrillOperation::compile_nc(op, caps)` → `CycleDefine`/`CycleCall`/`CycleOff` or `None`
+4. **NC IR additions** — `CycleDefine { cycle_type, params }`, `CycleCall { x, y }`, `CycleOff`
+5. **`PostProcessorCapabilities`** — `get_capabilities()` reads `supported_cycles`, `optional_skip_strategy`, `tool_length_compensation` from Lua module
+6. **`ToolLengthMode::ZeroAtTip`** — no G43 / no Heidenhain tool length; set per setup
+7. **Heidenhain canned cycles** — CYCL DEF 200, 203, 207; `L X+n Y+n FMAX M99`
+8. **G-code canned cycles** — linuxcnc G81/G83/G84, fanuc with G90 guard
+9. **Optional operations** — `optional_skip_level` (1–9); Heidenhain: `M1`; G-code: `/` prefix
+10. **Per-program CLI export** — `--output-dir` writes one file per tool; `--dry-run` lists what would be generated
 
-2. **STL import** (degraded)
-   - `io/stl_reader.rs`: STL → `TopoDS_Shape` via OpenCascade sewing (`BRepBuilderAPI_Sewing`)
-   - Triangular face shell — functional but without logical face reconstruction
+### CLI
 
-3. **B-rep tessellation**
-   - `PartGeometry::tessellate()`: B-rep → `TessellatedMesh` with `face_ids` per triangle
-   - Configurable deflection parameter
-
-4. **Mesh API**
-   - `GET /api/project/parts/{id}/mesh?deflection=0.1` — tessellated mesh with face IDs
-   - `GET /api/project/parts/{id}/contour?z={z}` — exact section at Z height
-
-5. **Face selection**
-   - `POST /api/project/parts/{id}/orient` — orient part by face normal (accepts `face_id`)
-   - Backend reads face normal from B-rep, computes orientation transform
-
-6. **B-rep sectioning for toolpaths**
-   - `toolpath/slicer.rs`: `BRepAlgoAPI_Section` (shape vs. plane) → exact curves
-   - Convert to `geo::MultiPolygon` for offset operations
-   - Preserve exact arcs for profile operations in controller compensation mode
-
-7. **3D project type**
-   - `ProjectType::ThreeD` — accepts STEP/STL, uses B-rep geometry
-   - `POST /api/project` with `project_type: "3d"`
-
-### Frontend Tasks
-
-8. **Three.js 3D viewport**
-   - `viewport/scene.ts`: Scene, renderer, lights
-   - `viewport/camera.ts`: OrbitControls (orbit, pan, zoom)
-   - `viewport/mesh-loader.ts`: Fetch tessellated mesh, create BufferGeometry with face_ids attribute
-   - `viewport/grid.ts`: XY grid + axes
-
-9. **Face interaction**
-   - Raycasting on tessellated mesh → triangle index → `face_ids` lookup → B-rep face ID
-   - Face highlighting on hover
-   - Click face for orientation ("set this face as top")
-   - Right-click context menu (orient, set WCS, add operation on face)
-
-10. **Toolpath visualization in 3D**
-    - `viewport/toolpath-renderer.ts`: Render toolpath lines over the 3D mesh
-    - `viewport/stock-renderer.ts`: Wireframe stock box
+```bash
+camproject drill holes.svg --params drill.yaml --output-dir ./nc/
+# → nc/T1_CENTER_DRILL.H, nc/T2_DRILL_6.H
+```
 
 ### Tests
 
-11. `test_step_reader.rs`: STEP import → expected face count, bounding box
-12. `test_stl_reader.rs`: STL sewing → valid TopoDS_Shape
-13. `test_tessellation.rs`: Tessellate → expected triangle count, face_ids consistency
-14. `test_slicer.rs`: Section B-rep at Z → expected exact curves
+11. `test_drill_cycles.rs`, golden files for CYCL DEF 200/203, G83
+    Per-tool split test: two-tool job → two correct NC files
 
 ### Deliverable
 
-User can create 3D projects, import STEP files, view the model in a 3D viewport, click faces to orient the part, and run all existing toolpath operations on sliced geometry. STL is supported as a degraded fallback.
+Two drill ops, different tools → `--output-dir nc/` → two `.H` files → load each in sequence, touching off Z at tip between tools.
 
 ---
 
-## Phase 6: Advanced Features
+## Phase 4: CLI 2.5D Milling — SVG Color Workflow
 
-**Goal**: Polish, performance, and advanced capabilities.
+**Goal**: Profile, pocket, facing driven by SVG stroke colors + YAML job file. One `camproject mill` command generates all NC programs for a job.
 
-### Tasks
+### SVG Color Workflow
 
-1. **Part update pipeline** (from `09-part-update.md`): Geometry diff, registration, operation audit, user review
-2. **Stock simulation**: Z-buffer material removal preview in viewport (API contracts defined in `02-api-design.md`)
-3. **3D toolpath strategies**: Waterline / Z-level roughing, raster finishing (future)
-4. **CAD integrations**: Onshape API, FreeCAD CLI bridge, watch folder (from `08-integrations.md`)
-5. **Performance**: Optimize toolpath generation for complex geometries, background computation via tokio tasks
+Paths in the SVG are selected by **stroke color**. The YAML maps each color to a full operation configuration. Circles → drill points; closed paths → profile or pocket; open paths with a color → ignored or error.
+
+```yaml
+# job.yaml
+postprocessor: heidenhain
+clearance: 5.0
+
+operations:
+  - color: "#00ff00"      # green circles → center drill
+    type: drill
+    tool_number: 1
+    tool_name: "Center Drill"
+    tool_diameter: 3.0
+    spindle_speed: 2000
+
+  - color: "#0000ff"      # blue circles → through drill
+    type: drill
+    tool_number: 2
+    tool_name: "Drill 6mm"
+    tool_diameter: 6.0
+    depth: 20.0
+    strategy: peck
+    peck_depth: 4.0
+    spindle_speed: 1500
+
+  - color: "#ff0000"      # red closed paths → outside profile
+    type: profile
+    side: outside
+    tool_number: 3
+    tool_name: "6mm End Mill"
+    tool_diameter: 6.0
+    depth: 8.0
+    stepdown: 2.0
+    spindle_speed: 8000
+    feed_rate: 800
+
+  - color: "#ff8800"      # orange closed paths → pocket
+    type: pocket
+    tool_number: 3
+    depth: 6.0
+    stepdown: 2.0
+    stepover: 2.4
+    entry: helix
+    helix_radius: 3.0
+    spindle_speed: 8000
+    feed_rate: 800
+```
+
+```bash
+camproject mill part.svg --params job.yaml --output-dir ./nc/
+# → nc/T1_CENTER_DRILL.H
+# → nc/T2_DRILL_6MM.H
+# → nc/T3_6MM_END_MILL.H   (profile + pocket combined, same tool)
+
+camproject mill part.svg --params job.yaml --dry-run
+# prints: 3 circles #00ff00 → drill T1
+#         2 circles #0000ff → drill T2
+#         1 path   #ff0000 → profile T3
+#         2 paths  #ff8800 → pocket T3
+
+# Roughing + finishing pass with same DXF, override allowance
+camproject mill part.svg --params job.yaml --color "#ff0000" --allowance 0.2 --output rough.H
+camproject mill part.svg --params job.yaml --color "#ff0000" --allowance 0.0 --output finish.H
+```
+
+### Color convention (suggested, not enforced)
+
+| Color | Operation |
+|-------|-----------|
+| `#00ff00` green | Center drill / spot drill |
+| `#0000ff` blue | Through drill |
+| `#ff0000` red | Profile outside |
+| `#ff00ff` magenta | Profile inside |
+| `#ff8800` orange | Pocket |
+| `#00ffff` cyan | Facing |
+
+The mapping is entirely user-controlled via YAML — this is just a suggested starting convention.
+
+### Backend Tasks
+
+1. **YAML job file** — `serde_yaml`, `JobParams` with top-level fields + `operations: Vec<OperationConfig>`
+2. **Color-keyed geometry grouping** — `io/svg_reader.rs` returns `Vec<ColorGroup { color: String, entities: Vec<Entity> }>`; DXF reader same
+3. **`camproject mill` subcommand** — parse SVG → group by color → match each group to `OperationConfig` → run operation → collect NCBlocks by tool → write per-tool files
+4. **`--dry-run` flag** — print color groups and matched operations, exit without generating NC
+5. **Polygon offset** — `toolpath/offset.rs`: `offset_polygon()`, `iterative_offset()`, contour extraction from color group
+6. **Depth strategy** — `toolpath/depth_strategy.rs`
+7. **Facing generator** — `toolpath/facing.rs`
+8. **Profile generator** — `toolpath/profile.rs`: inside/outside/on, CAM/controller comp, lead-in, tabs, depth passes
+9. **Pocket generator** — `toolpath/pocket.rs`: contour-parallel/zigzag, helix/plunge/ramp entry, depth passes
+10. **NC IR extensions** — `LinearMove` with feed, `ArcMove`, `SetFeedRate`, `CoolantOn/Off`, `CutterCompLeft/Right/Off`
+11. **Heidenhain milling (Lua)** — `L X+n Y+n F+n`, `CC`/`C DR+/-`, `RL`/`RR`/`R0`, `M8`/`M9`
+12. **Other post-processors (Lua)** — linuxcnc, grbl, marlin, fanuc milling output
+
+### Tests
+
+13. `test_offset.rs`, `test_depth_strategy.rs`, `test_facing.rs`, `test_profile.rs`, `test_pocket.rs`
+    `test_color_grouping.rs`: SVG with 3 colors → 3 groups with correct entities
+    Golden files: `heidenhain_profile.H`, `heidenhain_pocket.H`, `heidenhain_facing.H`
+    CLI integration: `camproject mill fixture.svg --params fixture_job.yaml --dry-run` matches expected groups
 
 ### Deliverable
 
-Production-quality tool with part update handling, simulation preview, and CAD system integrations.
+```bash
+camproject mill part.svg --params job.yaml --output-dir ./nc/
+```
+
+One command processes the full job: center drill, through drill, profile, pocket — each tool gets its own `.H` file. Draw in Inkscape, assign stroke colors, run command, machine the part.
 
 ---
 
 ## Priority and Dependencies
 
 ```
-Phase 1 (2.5D scaffolding) ─→ Phase 2 (toolpaths) ─→ Phase 3 (NC export)
-                                                            │
-                                              Phase 4 (drill + advanced post) ←─┘
-                                                            │
-                                              Phase 5 (3D projects) ←───────────┘
-                                                            │
-                                              Phase 6 (advanced) ←──────────────┘
+Phase 1 (import + color parsing)
+    └─→ Phase 2 (manual drill CLI)     ← first hardware test
+            └─→ Phase 3 (auto cycles)  ← full drilling done
+                    └─→ Phase 4 (mill CLI + SVG colors)  ← complete 2.5D workflow
 ```
 
-Phases 1-3 form the **minimum viable product**: import DXF → define operations → export G-code. This is a complete, usable tool for hobby CNC users.
+Phases 1–4 cover the full 2.5D machining workflow for a no-tool-changer Heidenhain machine, driven entirely from the command line. See `tasks/backlog.md` for deferred items (frontend, 3D projects, Inkscape extension).
 
-Phase 4 adds drill operations and industrial post-processors (Sinumerik, Heidenhain).
+---
 
-Phase 5 layers 3D support on top of the existing pipeline — the toolpath generators don't change, only the geometry input and frontend visualization.
+## Backlog (Deferred)
 
-Phase 6 is ongoing polish and advanced features.
+Items with clear design but no scheduled phase. Implement when the core CLI workflow is solid.
+
+- **Browser frontend** — 2D canvas viewport, operation panels, NC preview. Design in `tasks/backlog.md`.
+- **3D projects** — STEP/STL import, B-rep slicer, Three.js viewport. Most milling is 2.5D; slicing is the same pipeline regardless of input.
+- **Inkscape extension** — appears under Extensions > CAM; calls `camproject` CLI; shows parameter dialog in Inkscape. Eliminates file management step.
+- **Sinumerik post-processor**
+- **Part update pipeline** — geometry diff, ICP registration, operation audit
+- **Stock simulation** — Z-buffer material removal
+- **CAD integrations** — Onshape API, FreeCAD CLI bridge, watch folder

@@ -9,12 +9,12 @@ Quick reference of all design decisions made during planning sessions. For full 
 | Decision | Detail | Source |
 |----------|--------|--------|
 | Backend language | Rust (axum) | `docs/00-overview.md` |
-| Post-processors | Python via PyO3, entry_points plugin system | `docs/03-nc-and-postprocessors.md` |
-| Frontend | TypeScript + Vite, Three.js (3D) / Canvas (2.5D) | `docs/05-frontend-design.md` |
+| Post-processors | Lua 5.4 via mlua (~300KB embedded VM). Built-ins via `include_str!()`. User post-processors from config directory. | `docs/03-nc-and-postprocessors.md` |
+| Frontend | Deferred indefinitely. See `tasks/backlog.md`. | `docs/05-frontend-design.md` |
 | Geometry kernel | OpenCascade via `opencascade-rs` v0.2.0 (cxx.rs FFI). Hard dependency. | `discussions/opencascade-bindings.md` |
-| Primary geometry format | B-rep (`TopoDS_Shape`). Triangle meshes on demand for display only. | `discussions/brep-geometry.md` |
-| Project types | 3D (STEP/STL, B-rep, 3D viewport) and 2.5D (DXF/SVG, wires/faces, top-down view). Set at creation, immutable. | `discussions/brep-geometry.md` #3 |
-| Implementation order | 2.5D first (Phases 1-3), then 3D (Phase 5) | `docs/07-implementation-phases.md` |
+| Primary geometry format | SVG/DXF → color-grouped entities (Circle, ClosedPath, OpenPath). B-rep used for exact curves internally. | `discussions/brep-geometry.md` |
+| Project scope | 2.5D only (SVG/DXF input, top-down view). 3D projects (STEP/STL, Three.js viewport) deferred to backlog. | `tasks/backlog.md` |
+| Implementation order | CLI first. Phase 1=scaffolding+import, Phase 2=manual drill, Phase 3=auto drill cycles, Phase 4=2.5D milling. Frontend and 3D are backlog. | `docs/07-implementation-phases.md` |
 | Shape persistence | Separate `.brep` file per part alongside `.camproj` JSON | `discussions/brep-geometry.md` #7 |
 
 ## Data Model
@@ -58,5 +58,7 @@ Quick reference of all design decisions made during planning sessions. For full 
 |------|--------|--------|
 | API endpoint response examples | Fill in during implementation | `discussions/deferred-ideas.md` |
 | Face/feature selection details | Partially resolved by B-rep face_ids. Tangent face grouping still open. | `discussions/deferred-ideas.md` |
-| Setup sheets / job documentation | Revisit after Phase 3 | `discussions/deferred-ideas.md` |
-| Simulation API contracts | Defined in `02-api-design.md` as future placeholders | `discussions/api.md` #2.8 |
+| Setup sheets / job documentation | Revisit after Phase 4 (2.5D milling complete) | `discussions/deferred-ideas.md` |
+| Simulation API contracts | Defined in `02-api-design.md` as future placeholders (deferred) | `discussions/api.md` #2.8 |
+| Frontend | Browser UI, Three.js viewport, toolpath visualization | `tasks/backlog.md` |
+| 3D projects | STEP/STL import, 3D viewport, B-rep slicer | `tasks/backlog.md` |

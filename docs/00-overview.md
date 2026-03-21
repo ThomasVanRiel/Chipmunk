@@ -2,117 +2,141 @@
 
 ## Purpose
 
-A browser-based CAM (Computer-Aided Manufacturing) tool that generates NC code for CNC milling machines. The system accepts 3D models and 2D drawings as input, allows the user to define machining operations, generates toolpaths, and exports controller-agnostic NC code through pluggable post-processors.
+A CLI-first CAM (Computer-Aided Manufacturing) tool that generates NC code for CNC milling machines. SVG or DXF files are used as input, machining operations are defined via YAML job files, and the tool exports controller-agnostic NC code through pluggable post-processors.
+
+A REST API and browser frontend exist as a parallel interface for future use (remote access, GUI workflows) but the CLI is the primary interface.
 
 ## High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Browser (Frontend)                   │
-│  ┌──────────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐  │
-│  │  Three.js 3D │ │Operations│ │   Tool   │ │   NC   │  │
-│  │   Viewport   │ │  Panel   │ │ Library  │ │Preview │  │
-│  └──────────────┘ └──────────┘ └──────────┘ └────────┘  │
-└──────────────────────┬──────────────────────────────────┘
-                       │ REST API + WebSocket
-┌──────────────────────┴──────────────────────────────────┐
-│                  Axum Backend (Rust)                     │
-│                                                         │
-│  ┌─────────┐  ┌──────────┐  ┌────┐  ┌───────────────┐   │
-│  │  api/   │→ │  core/   │→ │ nc/│→ │postprocessors/│   │
-│  │ routes  │  │ geometry │  │ IR │  │  (Python via  │   │
-│  │ websock │  │ tools    │  │comp│  │   PyO3)       │   │
-│  └─────────┘  │ ops      │  └────┘  │  linuxcnc     │   │
-│               └──────────┘          │  grbl          │   │
-│                    ↑                │  fanuc         │   │
-│  ┌─────────┐  ┌──────────┐          │  heidenhain    │   │
-│  │   io/   │  │toolpath/ │          └───────────────┘   │
-│  │ step    │  │ slicer   │                              │
-│  │ dxf     │  │ offset   │                              │
-│  │ stl     │  │ facing   │                              │
-│  │ svg     │  │ profile  │                              │
-│  └─────────┘  │ pocket   │                              │
-│               └──────────┘                              │
-└─────────────────────────────────────────────────────────┘
+  ┌─────────────────────┐         ┌──────────────────────┐
+  │       CLI            │         │   API (axum)          │
+  │  camproject mill     │         │   REST + WebSocket    │
+  │  camproject drill    │         │   (future frontend,   │
+  │  camproject serve    │         │    remote access)     │
+  └──────────┬──────────┘         └──────────┬───────────┘
+             │                               │
+             │         call directly         │
+             └──────────────┬────────────────┘
+                            │
+          ┌─────────────────▼─────────────────────┐
+          │             Core Library               │
+          │                                        │
+          │  ┌─────────┐  ┌──────────┐  ┌──────┐  │
+          │  │  core/  │  │toolpath/ │  │  nc/ │  │
+          │  │ project │  │ facing   │  │  IR  │  │
+          │  │ geometry│  │ profile  │  │ comp │  │
+          │  │ tool    │  │ pocket   │  │      │  │
+          │  │ operation│ │ drill    │  └──┬───┘  │
+          │  └─────────┘  │ offset   │     │      │
+          │               │ depth    │     │      │
+          │  ┌─────────┐  └──────────┘     │      │
+          │  │   io/   │              ┌────▼────┐  │
+          │  │  svg    │              │  post-  │  │
+          │  │  dxf    │              │processors│  │
+          │  │  brep   │              │  (Lua)  │  │
+          │  └─────────┘              └─────────┘  │
+          └────────────────────────────────────────┘
 ```
 
-## Hybrid Rust + Python Architecture
+The CLI and API are **peer-level thin shells** over the same library. The CLI calls library functions directly — no HTTP, no server process. The API does the same via HTTP handlers. Neither knows about the other.
 
-The project uses a **Rust backend** for all performance-critical computation (geometry processing, toolpath generation, NC IR compilation, API serving) and **Python for post-processors** to maximize extensibility.
+## CLI and API Relationship
 
-**Why Rust for the backend?**
-- Computational geometry and toolpath generation are CPU-intensive — Rust's performance is a natural fit
-- Strong type system catches data model errors at compile time
-- Axum provides async HTTP + WebSocket with excellent performance
-- Memory safety without GC overhead
+```
+            core library functions
+                    │
+        ┌───────────┴───────────┐
+        │                       │
+  cli/mill.rs              api/routes.rs
+  ┌──────────────┐         ┌──────────────┐
+  │ parse args   │         │ parse request│
+  │ call library │         │ call library │
+  │ write files  │         │ return JSON  │
+  └──────────────┘         └──────────────┘
+```
 
-**Why Python for post-processors?**
-- Post-processors are the most likely extension point for end users
-- Python is widely known in the CNC/manufacturing community
-- Custom post-processors often involve string formatting and controller-specific quirks — Python excels at this
-- Python entry_points provide a mature plugin discovery mechanism
-- PyO3 bridges Rust ↔ Python efficiently
+Consequences:
+- **CLI never goes through HTTP** — no server startup per invocation, no serialization overhead
+- **API always calls real code** — same paths as the CLI, implicitly tested when CLI tests pass
+- **No refactoring needed** when the frontend arrives — the API is already wired to working logic
+- **Remote access works today** — `camproject serve` exposes the same operations over HTTP for scripting, CI, or a future frontend
 
-**The boundary**: Rust produces `NCBlock` IR (a list of structured blocks). Python post-processors receive this IR as Python objects (via PyO3) and format it into machine-specific NC code strings. The Rust side never generates G-code directly.
+## Data Flow
+
+```
+SVG/DXF + YAML job
+        │
+        ▼
+  io/: parse geometry, group by stroke color
+        │
+        ▼
+  core/: Tool, Setup, Operation structs
+        │
+        ▼
+  toolpath/: generate segments (rapid, linear, arc, drill point)
+        │
+        ▼
+  nc/: compile to NCBlock IR (controller-neutral)
+        │
+        ▼
+  nc/bridge: Lua VM → post-processor → NC string
+        │
+        ▼
+  .H / .nc / .gcode file
+```
+
+Each stage is independently testable and produces a well-defined output type.
 
 ## Design Principles
 
-### 1. Separation of Concerns
+### 1. CLI first, API as peer
 
-`core/`, `toolpath/`, `nc/`, and `io/` are pure computational Rust modules with no web framework dependencies. They are independently testable without a running server or browser. The `api/` module is a thin adapter between HTTP and the core logic.
+The CLI is the primary interface during active development — it gives direct hardware feedback with no server overhead. The API is a peer consumer of the same library, not a wrapper around the CLI. Both are implemented; the CLI is what gets tested against real machines first.
 
-### 2. Data Flow is Unidirectional
+### 2. Separation of concerns
 
-```
-File Import → PartGeometry → Operation (geometry + tool + params)
-    → Toolpath → NCBlock list → PostProcessor (Python) → NC code string
-```
+`core/`, `toolpath/`, `nc/`, and `io/` are pure computational modules with no dependency on axum or clap. They are independently testable without a running server or argument parser. `cli/` and `api/` are thin adapters.
 
-Each stage is independently testable and produces a well-defined output.
+### 3. SVG color workflow
 
-### 3. Controller Agnosticism
+Operations are selected by SVG stroke color. Each color maps to a full operation configuration in the YAML job file. Circles → drill points or circular pockets. Closed paths → profile, pocket, or facing area. One SVG + one YAML → one or more NC files (split by tool).
 
-Toolpaths are generated as abstract segment sequences (rapid, linear, arc). These are compiled to a controller-neutral intermediate representation (`NCBlock` list). Only the final post-processor step formats machine-specific output.
+### 4. Controller agnosticism
 
-### 4. Plugin Extensibility
+Toolpaths are generated as abstract segment sequences (rapid, linear, arc). These are compiled to a controller-neutral IR (`NCBlock` list). Only the final Lua post-processor step formats machine-specific output. The same toolpath compiles to Heidenhain conversational, G-code, or any other format.
 
-New post-processors are written in Python, registered via entry points, and discovered at runtime. New operation types, importers, and toolpath strategies are added as Rust modules.
+### 5. No-tool-changer workflow
 
-### 5. No Singleton State
+Z=0 is set at the tool tip before each program run — no tool length measurement or compensation needed. Operations are grouped by tool and exported as separate NC files. Each file is self-contained: spindle on, moves, spindle off.
 
-The `Project` struct is the root of all state. The server could theoretically serve multiple projects. All computation functions are pure (inputs → outputs).
+### 6. Trust the operator
 
-### 6. Trust the Operator
+Warnings only for physically impossible situations (tool wider than pocket, depth exceeds geometry). Aggressive feeds, deep cuts, and unconventional strategies are the operator's prerogative.
 
-The CAM tool is not a nanny. Warnings are shown only when something is **physically impossible** (e.g., tool wider than pocket, depth exceeds part geometry). Suboptimal parameters (aggressive feeds, deep cuts, unconventional strategies) are the operator's prerogative. No "are you sure?" dialogs for valid but aggressive choices.
+### 7. Plugin post-processors
 
-### 7. Auto-Persistence
-
-Every change is persisted immediately server-side. There is no save button and no "unsaved changes" state. The project is always current. Undo/redo operates on a persistent command history.
+Post-processors are Lua modules embedded at compile time (`include_str!`). User post-processors are `.lua` files placed in the config directory, discovered at startup. A fresh Lua VM is created per NC generation call — no shared state between runs.
 
 ## Technology Choices
 
-| Component | Choice | License | Rationale |
-|-----------|--------|---------|-----------|
-| Backend framework | axum | MIT | Async, WebSocket support, tower middleware, excellent Rust ecosystem |
-| Async runtime | tokio | MIT | Industry standard Rust async runtime |
-| Serialization | serde + serde_json | MIT | Standard Rust serialization |
-| HTTP client (integrations) | reqwest | MIT/Apache | Async HTTP client for Onshape API etc. |
-| Geometry kernel | opencascade-rs | LGPL | OpenCascade Rust bindings — B-rep geometry, STEP/STL/DXF import, sectioning, tessellation |
-| 2D geometry | geo + geo-clipper | MIT/Apache | Rust computational geometry with Clipper2 bindings |
-| Polygon offset | clipper2 (via geo-clipper) | BSL-1.0 | Fast polygon offsetting for toolpath compensation |
-| Linear algebra | nalgebra / glam | MIT/Apache | Vectors, matrices, transforms |
-| Python bridge | PyO3 + maturin | MIT/Apache | Rust ↔ Python FFI for post-processors |
-| Post-processor runtime | Python (embedded via PyO3) | — | Post-processor plugin execution |
-| Post-processor plugins | Python entry_points | — | Plugin discovery via importlib.metadata |
-| 3D visualization | Three.js | MIT | Industry standard for browser 3D |
-| Frontend language | TypeScript | — | Type safety for API contracts |
-| Frontend bundler | Vite | MIT | Fast HMR, TypeScript support |
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| Language | Rust | Performance-critical geometry and toolpath work; strong type system; single binary distribution |
+| CLI parsing | clap | Ergonomic subcommand + flag parsing |
+| API framework | axum | Async HTTP + WebSocket; same binary as CLI via subcommand |
+| Serialization | serde + serde_json + serde_yaml | JSON for API/project files; YAML for job files |
+| Geometry kernel | opencascade-rs | B-rep geometry, SVG/DXF import, exact curves |
+| 2D geometry | geo + geo-clipper | Polygon offset via Clipper2 bindings |
+| Linear algebra | nalgebra | Vectors, matrices, transforms |
+| Post-processors | Lua 5.4 via mlua | Embedded VM (~300KB); designed for string formatting; safe sandboxed execution |
+| HTTP client | reqwest | Async; used for CAD integrations (Onshape etc.) |
 
-## Why Browser-Based?
+## Deferred (backlog)
 
-- **Cross-platform**: Works on any OS with a browser — no Qt/GTK dependency issues
-- **Three.js excellence**: WebGL-based 3D rendering is mature, performant, and well-documented
-- **Deployment flexibility**: Can run locally, or be deployed as a shared service
-- **Modern UI**: HTML/CSS is far more flexible for UI layout than desktop widget toolkits
-- **Lower barrier**: Users don't need to install a desktop application
+- **Browser frontend** — 2D canvas viewport, operation panels, NC preview
+- **3D projects** — STEP/STL input, B-rep slicer, Three.js viewport
+- **Inkscape extension** — Extensions > CAM menu; calls CLI or local API
+- **Stock simulation**, **part update pipeline**, **CAD integrations**
+
+See `tasks/backlog.md` for design notes on each.
