@@ -1,3 +1,4 @@
+use chipmunk::io::job::load_job;
 use clap::Parser;
 use tracing_subscriber;
 
@@ -23,6 +24,13 @@ fn main() {
         }
         Some(path) => {
             tracing::info!("Processing job file: {}", path);
+            match load_job(path) {
+                Ok(job) => println!("{:#?}", job),
+                Err(e) => {
+                    tracing::error!("{}", e);
+                    std::process::exit(1);
+                }
+            }
         }
         None => {
             eprintln!("Error: no input file provided");
