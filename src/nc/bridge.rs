@@ -14,6 +14,8 @@ pub fn generate_nc(
     let lua = Lua::new();
 
     // Load base and postprocessor into vm
+    // TODO: require("base") might be better for pp development. Using global functions as is is
+    // also possible, decide later.
     lua.load(base_lua).set_name("base").exec()?;
     let pp: LuaTable = lua.load(postprocessor_lua).eval()?;
 
@@ -37,6 +39,8 @@ pub fn generate_nc(
 fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
     let table = lua.create_table()?;
     match block {
+        // TODO: Name and units should be passed to PP as context, not in blocks.
+        // As a matter of fact, they already are. We should use them.
         NCBlock::ProgramStart { name, units } => {
             table.set("type", "program_start")?;
             table.set("name", name.as_str())?;

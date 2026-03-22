@@ -68,48 +68,37 @@ fn main() {
                         })
                         .collect::<Vec<_>>();
                     let blocks: Vec<NCBlock> = nc::compiler::compile_manual_drill(
-                        &name,
-                        units_str,
-                        &tool,
-                        clearance,
-                        &segments,
+                        &name, units_str, &tool, clearance, &segments,
                     );
 
                     // Load post-processor Lua files
                     let pp_path = pp.unwrap_or_else(|| {
-                        eprintln!(
-                            "Error: post-processor '{}' not found",
-                            job.postprocessor
-                        );
+                        eprintln!("Error: post-processor '{}' not found", job.postprocessor);
                         std::process::exit(1);
                     });
                     let pp_lua = std::fs::read_to_string(&pp_path).unwrap_or_else(|e| {
                         eprintln!("Error reading post-processor: {}", e);
                         std::process::exit(1);
                     });
-                    let base_lua =
-                        std::fs::read_to_string(nc::postprocessors::BASE_LUA_PATH)
+                    let base_lua = std::fs::read_to_string(nc::postprocessors::BASE_LUA_PATH)
+                        .unwrap_or_else(|e| {
+                            eprintln!("Error reading base.lua: {}", e);
+                            std::process::exit(1);
+                        });
+                    let nc_output =
+                        nc::bridge::generate_nc(&base_lua, &pp_lua, &blocks, &name, units_str)
                             .unwrap_or_else(|e| {
-                                eprintln!("Error reading base.lua: {}", e);
+                                eprintln!("Error generating NC: {}", e);
                                 std::process::exit(1);
                             });
-                    let nc_output = nc::bridge::generate_nc(
-                        &base_lua, &pp_lua, &blocks, &name, units_str,
-                    )
-                    .unwrap_or_else(|e| {
-                        eprintln!("Error generating NC: {}", e);
-                        std::process::exit(1);
-                    });
 
                     // Output to file or stdout
                     match &cli.output {
                         Some(output_path) => {
-                            std::fs::write(output_path, &nc_output).unwrap_or_else(
-                                |e| {
-                                    eprintln!("Error writing output: {}", e);
-                                    std::process::exit(1);
-                                },
-                            );
+                            std::fs::write(output_path, &nc_output).unwrap_or_else(|e| {
+                                eprintln!("Error writing output: {}", e);
+                                std::process::exit(1);
+                            });
                             println!("Written to {}", output_path);
                         }
                         None => print!("{}", nc_output),

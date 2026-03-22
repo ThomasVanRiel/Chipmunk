@@ -1,5 +1,6 @@
 use crate::core::tool::SpindleDirection;
 
+// TODO: name and units do not belong in the IR blocks, they are context.
 #[derive(Debug, Clone)]
 pub enum NCBlock {
     ProgramStart {
