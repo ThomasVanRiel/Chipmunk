@@ -181,7 +181,7 @@ Post-processors that support constant surface speed natively (Sinumerik `G96`, H
 
 | `strategy` | Behaviour |
 |---|---|
-| `manual` | Rapid to XY, mandatory stop (M0). Operator drills by hand or with quill. No Z motion from machine. |
+| `manual` | Comment + M0 acknowledge, spindle on, rapid to each XY position. Operator runs in single block mode, drills by hand or with quill. No Z motion from machine. |
 | `simple` | Feed to full depth in one pass, retract. |
 | `peck` | Feed in increments (`peck_depth`), full retract between pecks to clear chips. Uses canned cycle if post-processor supports it. |
 | `chip_break` | Feed in increments, partial retract to break chip without clearing. |
@@ -205,10 +205,10 @@ Geometry groups found in clamp_jaw.svg:
   #ff0000   1 closed path   → profile outside T2 (End Mill 8mm)
 ```
 
-If a color in the SVG has no matching entry in the YAML, it is listed as a warning:
+If a color in the SVG has no matching entry in the YAML, it is a hard error:
 
 ```
-Warning: SVG contains paths with color #888888 — no matching operation in job YAML, skipped.
+Error: SVG contains paths with color #888888 — no matching operation in job YAML.
 ```
 
 ---
@@ -390,9 +390,9 @@ The same color can be used for a mix of circular and rectangular pockets — all
 
 ### Manual drilling (quill or hand drill)
 
-Use `strategy: manual` when the machine positions the tool and the operator drills by hand. The program contains only XY rapid moves — no Z motion, no spindle commands, no M0 stops.
+Use `strategy: manual` when the machine positions the tool and the operator drills by hand. The program emits a comment and M0 at the start so the operator knows to enable single block mode, then activates the spindle and rapids to each position. No Z motion from the machine.
 
-Run the program in **single block mode** on the controller. The controller stops after each positioning move; the operator drills the hole, then presses cycle start to advance.
+The operator enables single block mode after the acknowledge stop. The controller then stops after each positioning move; the operator drills the hole, then presses cycle start to advance.
 
 Using color (circles extracted from geometry file):
 ```yaml
@@ -401,7 +401,7 @@ Using color (circles extracted from geometry file):
     tool_number: 1
     tool_name: "Drill 8.5mm"
     tool_diameter: 8.5
-    strategy: manual        # depth, feed, spindle_speed all ignored
+    strategy: manual        # depth, feed ignored; spindle_speed used
 ```
 
 Or with explicit coordinates (no geometry file needed for this operation):
@@ -420,16 +420,18 @@ Or with explicit coordinates (no geometry file needed for this operation):
 Heidenhain output:
 
 ```
-TOOL CALL 1 Z S0
-L Z+10.000 FMAX
+TOOL CALL 1 Z S800
+; ENABLE SINGLE BLOCK MODE FOR MANUAL DRILLING
+M0
+L Z+10.000 FMAX M3
 L X+15.000 Y+20.000 FMAX
 L X+45.000 Y+20.000 FMAX
 L X+75.000 Y+20.000 FMAX
-L Z+10.000 FMAX
+L Z+10.000 FMAX M5
 END PGM DRILL MM
 ```
 
-No `STOP` blocks, no `M3`/`M5`. The operator starts the spindle manually if needed (quill drilling), or leaves it off (hand drill). Single block mode gives full control over pacing without cluttering the program.
+The comment + M0 at the start tells the operator to enable single block mode. The spindle is activated before the first rapid. Single block mode gives full control over pacing without cluttering the program with stops between points.
 
 ### Listing available post-processors
 
@@ -457,6 +459,7 @@ The YAML file is the sole input. All operation parameters live in the YAML; flag
 | `--color <hex>` | e.g. `#ff0000` | Process only operations matching this stroke color |
 | `--tool <n>` | Integer | Output only operations for tool number N |
 | `--allowance <f>` | mm | Override `allowance:` on all matching operations |
+| `--plot <path>` | SVG file path | Generate an SVG of toolpaths alongside NC output. Reflects `--tool` and `--color` filters. Layers for geometry, stock, and toolpaths; color coded by operation; dashed rapids, solid feeds. |
 | `--check` | — | Validate job file: parse geometry, resolve tools, match color groups; print summary and exit without generating NC |
 | `--output <path>` | File path | Write NC to file; omit to write to stdout |
 

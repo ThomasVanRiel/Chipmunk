@@ -81,7 +81,7 @@ No STOP blocks, no spindle commands — the operator activates single block mode
 6. **mlua bridge** — `nc/bridge.rs`: fresh Lua VM per call, load base.lua + post-processor, call `M.generate()`
 7. **Post-processor registry** — `nc/postprocessors/mod.rs`: `BUILTIN_POSTPROCESSORS` array
 8. **`postprocessors/base.lua`** — `M.fmt()`, `M.hh_coord()` (explicit sign)
-9. **`postprocessors/heidenhain.lua`** — manual drill mode: header, `L X+n Y+n FMAX` + `STOP` per point, footer
+9. **`postprocessors/heidenhain.lua`** — manual drill mode: header, comment + M0 acknowledge, spindle on, `L X+n Y+n FMAX` per point, footer
 
 ### CLI
 

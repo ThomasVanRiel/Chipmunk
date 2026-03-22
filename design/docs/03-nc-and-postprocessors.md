@@ -579,7 +579,7 @@ The `DrillOperation` supports several strategies, selected via `strategy:` in th
 
 | Strategy | YAML value | Description |
 |---|---|---|
-| Manual | `manual` | Rapid to XY at clearance, `Stop` (M0). Operator drills with quill or hand tool, presses cycle start to continue. No Z motion from the machine. |
+| Manual | `manual` | Comment + M0 acknowledge, spindle on, rapid to each XY at clearance. Operator enables single block mode after acknowledge, drills with quill or hand tool, presses cycle start to advance. No Z motion from the machine. |
 | Simple | `simple` | Machine feeds down to full depth in one pass, retracts. No `CycleDefine` — explicit moves. |
 | Peck | `peck` | Feeds in increments (`peck_depth`), retracts fully between pecks to clear chips. Emits `CycleDefine(peck_drill)` when post-processor supports it. |
 | Chip break | `chip_break` | Feeds in increments, retracts by a small amount (not fully) to break chips without clearing them. |
@@ -588,30 +588,32 @@ The `DrillOperation` supports several strategies, selected via `strategy:` in th
 
 ### Manual Drill
 
-The manual strategy produces a simple XY traversal program with no Z motion and no spindle commands. The operator runs the program in **single block mode** — the controller executes one block at a time and pauses after each, waiting for cycle start. The operator drills each hole by hand (quill or hand drill) and presses cycle start to advance to the next position.
+The manual strategy produces an XY traversal program with no Z motion. The program starts with a comment and M0 telling the operator to enable single block mode, then activates the spindle and rapids to each position. The operator drills each hole by hand (quill or hand drill) and presses cycle start to advance to the next position.
 
-This is preferable to inserting `STOP` (M0) blocks between positions because:
-- No spindle state to manage — `M3`/`M5` are omitted; the operator starts the spindle manually if needed, or not at all
-- Single block mode is a standard operator skill; the program itself stays clean
-- The operator can choose to advance multiple positions without stopping simply by not being in single block mode
+Single block mode is preferable to inserting `STOP` (M0) blocks between positions because:
+- The program stays clean — no stops cluttering the point list
+- The operator can choose to advance multiple positions without stopping simply by disabling single block mode
+- Single block mode is a standard operator skill
 
 The NC output (Heidenhain):
 
 ```
-TOOL CALL 1 Z S0             ; tool call, no spindle speed
-L Z+10.000 FMAX              ; raise to clearance (no M3)
+TOOL CALL 1 Z S800
+; ENABLE SINGLE BLOCK MODE FOR MANUAL DRILLING
+M0
+L Z+10.000 FMAX M3           ; raise to clearance, spindle on
 L X+15.000 Y+20.000 FMAX    ; position over hole 1  ← stop here in single block
 L X+45.000 Y+20.000 FMAX    ; position over hole 2  ← stop here in single block
 L X+75.000 Y+20.000 FMAX    ; position over hole 3  ← stop here in single block
-L Z+10.000 FMAX              ; retract (no M5)
+L Z+10.000 FMAX M5           ; retract, spindle off
 ```
 
-In the IR, manual drill compiles to `Rapid` blocks only — no `Stop`, no `CycleDefine`, no spindle blocks. Every post-processor handles this without any special cycle support.
+In the IR, manual drill compiles to a `Comment` + `Stop` (acknowledge), then `SpindleOn`, `Rapid` blocks, and `SpindleOff`. No `CycleDefine`. Every post-processor handles this without any special cycle support.
 
 ```yaml
 # YAML
 strategy: manual
-# depth, peck_depth, feed_rate, spindle_speed are all ignored
+# depth, peck_depth, feed_rate are ignored; spindle_speed is used
 ```
 
 ---

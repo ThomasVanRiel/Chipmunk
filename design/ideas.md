@@ -2,10 +2,8 @@
 
 ## inbox
 
-* Drilling cycles: Insert acknowledge line in manual drilling cycle so the operator knows to enable single block mode
-* Usage.md: Tools should also mention their origin when checking a file.
-* Usage.md: manual drilling should not use optional stop. Spindle speed will be activated before movements.
-* Usage.md: Color mismatch should not be a warning but a hard error. The user asks the impossible.
+*(empty)*
+
 
 ---
 
@@ -16,6 +14,21 @@ Omitting `--output` prints to stdout. Also support `--output -` explicitly (Unix
 
 **Post-processor error returns**
 The Lua post-processor can return `nil, "error message"` (idiomatic Lua) to signal an error — e.g. overtravel, unsupported cycle. Chipmunk prints the message to stderr and exits with code 1. Error content is free-form string; no structured error types needed.
+
+**Tool origin in `chipmunk check`**
+`chipmunk check job.yaml` shows each tool with its resolution level: user library, project, setup, or inline. Purely informational — no warnings about shadowing.
+
+**Manual drilling: spindle on, acknowledge line, no optional stops**
+Spindle is activated before movements (not S0). No optional stops (M01) between points — operator uses single block mode to step through. Combined with the acknowledge line below.
+
+**Manual drilling: acknowledge line before cycle**
+Before spindle on, emit a comment line (e.g. `; ENABLE SINGLE BLOCK MODE FOR MANUAL DRILLING`) followed by M0. The operator reads the comment, enables single block mode, and presses cycle start. No corresponding message at end of cycle.
+
+**`--plot` flag for toolpath SVG output**
+`--plot <path>` generates an SVG of toolpaths alongside normal NC generation (e.g. `chipmunk job.yaml --output part.H --plot toolpaths.svg`). Reflects the same operations as the NC output — respects `--tool` and `--color` filters. SVG contains separate layers (`<g>` groups) for original geometry, stock outline, and toolpaths, so they can be toggled in an SVG viewer. Color coded by operation. Within each operation color, rapids are dashed lines, feeds are solid.
+
+**Color mismatch is a hard error**
+If an SVG contains paths with a stroke color that has no matching operation in the job YAML, Chipmunk exits with a hard error (exit code 1). The user asks the impossible — never silently skip geometry.
 
 **Feeds and speeds: absolute or cutting parameters**
 Two input modes for the same fields:
