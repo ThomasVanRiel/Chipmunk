@@ -40,7 +40,7 @@ fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
         NCBlock::ProgramStart { name, units } => {
             table.set("type", "program_start")?;
             table.set("name", name.as_str())?;
-            table.set("units", units.to_lowercase().as_str())?;
+            table.set("units", units.as_str())?;
         }
         NCBlock::ToolChange {
             tool_number,
@@ -77,9 +77,10 @@ fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
             table.set("y", *y)?;
             table.set("z", *z)?;
         }
-        NCBlock::ProgramEnd { name } => {
+        NCBlock::ProgramEnd { name, units } => {
             table.set("type", "program_end")?;
             table.set("name", name.as_str())?;
+            table.set("units", units.as_str())?;
         }
         #[allow(unreachable_patterns)]
         _ => {

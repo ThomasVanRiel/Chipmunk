@@ -1,10 +1,14 @@
+use crate::core::units::Units;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct JobConfig {
+    pub name: Option<String>,
     pub postprocessor: String,
     pub clearance: f64,
     pub operations: Vec<OperationConfig>,
+    #[serde(default)]
+    pub units: Units,
 }
 
 #[derive(Debug, Deserialize)]
@@ -16,7 +20,7 @@ pub struct OperationConfig {
     pub tool_name: Option<String>,
     pub tool_diameter: Option<f64>,
     pub spindle_speed: f64,
-    pub points: Vec<[f64;2]>,
+    pub points: Vec<[f64; 2]>,
 }
 
 pub fn load_job(path: &str) -> anyhow::Result<JobConfig> {

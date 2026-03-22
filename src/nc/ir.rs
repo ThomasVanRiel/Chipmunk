@@ -25,5 +25,6 @@ pub enum NCBlock {
     SpindleOff,
     ProgramEnd {
         name: String,
+        units: String,
     },
 }

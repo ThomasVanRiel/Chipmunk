@@ -1,6 +1,6 @@
 -- postprocessors/heidenhain.lua
--- Load base module with helper functions
-local base = require("base")
+-- -- Load base module with helper functions
+-- local base = require("base")
 
 -- Define module to return formatted NC code to Chipmunk
 local M = {}
@@ -45,13 +45,13 @@ end
 
 function M.format_block(block)
 	if block.type == "program_start" then
-		return "BEGIN PGM " .. block.name .. block.units
+		return "BEGIN PGM " .. block.name .. " " .. block.units
 	elseif block.type == "program_end" then
-		return "END PGM " .. block.name .. block.units
+		return "END PGM " .. block.name .. " " .. block.units
 	elseif block.type == "tool_change" then
-		return "TOOL CALL " .. block.tool_number .. "Z S" .. block.spindle_speed
+		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed
 	elseif block.type == "comment" then
-		return "; " .. block.text
+		return "; " .. block.comment
 	elseif block.type == "stop" then
 		return "M0"
 	elseif block.type == "spindle_on" then
@@ -61,16 +61,16 @@ function M.format_block(block)
 		-- TODO: tricky block as it is merged with the next rapid
 		return ""
 	elseif block.type == "rapid" then
-		local line = "L "
+		local line = "L"
 		-- TODO: extract to separate function as linear feed will have same logic
-		if base.x then
-			line = line .. base.hhCoord("X", base.x)
+		if block.x then
+			line = line .. HhCoord(" X", block.x)
 		end
-		if base.y then
-			line = line .. base.hhCoord("Y", base.y)
+		if block.y then
+			line = line .. HhCoord(" Y", block.y)
 		end
-		if base.z then
-			line = line .. base.hhCoord("Z", base.z)
+		if block.z then
+			line = line .. HhCoord(" Z", block.z)
 		end
 		line = line .. " FMAX"
 		return line

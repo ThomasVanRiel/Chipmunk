@@ -1,3 +1,4 @@
+name: drilltest
 postprocessor: heidenhain
 clearance: 5.0
 

@@ -1,5 +1,10 @@
-use chipmunk::io::job::load_job;
+use chipmunk::{
+    core::{toolpath::ToolpathSegment, units},
+    io::job::load_job,
+    nc::{self, ir::NCBlock},
+};
 use clap::Parser;
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "chipmunk", about = "CLI CAM tool")]
@@ -19,12 +24,97 @@ fn main() {
     tracing::info!("Starting chipmunk");
     match cli.input.as_deref() {
         Some("postprocessors") => {
-            println!("No postprocessors registered.");
+            let postprocessors: Vec<String> = nc::postprocessors::list_postprocessors();
+            println!("Available postprocessors: {}", postprocessors.join(","));
         }
         Some(path) => {
             tracing::info!("Processing job file: {}", path);
             match load_job(path) {
-                Ok(job) => println!("{:#?}", job),
+                Ok(job) => {
+                    // TODO: Replace this LLM generated placeholder implementation that was used to
+                    // test the function of the program
+                    let pp = nc::postprocessors::find_postprocessor(&job.postprocessor);
+                    let name: String = job.name.unwrap_or_else(|| {
+                        Path::new(path)
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned()
+                    });
+
+                    let units_str = match job.units {
+                        chipmunk::core::units::Units::Mm => "MM",
+                        chipmunk::core::units::Units::Inch => "INCH",
+                    };
+
+                    let clearance = job.clearance;
+                    // Operations will be a single operation in this test
+                    let operation = job.operations.first().unwrap();
+                    let tool = chipmunk::core::tool::Tool {
+                        tool_number: operation.tool_number.unwrap_or(1),
+                        name: operation.tool_name.clone().unwrap_or_default(),
+                        diameter: operation.tool_diameter.unwrap_or(0.0),
+                        spindle_speed: operation.spindle_speed,
+                        spindle_direction: chipmunk::core::tool::SpindleDirection::Cw,
+                    };
+                    let segments = operation
+                        .points
+                        .iter()
+                        .map(|[x, y]| ToolpathSegment {
+                            move_type: chipmunk::core::toolpath::MoveType::Rapid,
+                            x: *x,
+                            y: *y,
+                            z: clearance,
+                        })
+                        .collect::<Vec<_>>();
+                    let blocks: Vec<NCBlock> = nc::compiler::compile_manual_drill(
+                        &name,
+                        units_str,
+                        &tool,
+                        clearance,
+                        &segments,
+                    );
+
+                    // Load post-processor Lua files
+                    let pp_path = pp.unwrap_or_else(|| {
+                        eprintln!(
+                            "Error: post-processor '{}' not found",
+                            job.postprocessor
+                        );
+                        std::process::exit(1);
+                    });
+                    let pp_lua = std::fs::read_to_string(&pp_path).unwrap_or_else(|e| {
+                        eprintln!("Error reading post-processor: {}", e);
+                        std::process::exit(1);
+                    });
+                    let base_lua =
+                        std::fs::read_to_string(nc::postprocessors::BASE_LUA_PATH)
+                            .unwrap_or_else(|e| {
+                                eprintln!("Error reading base.lua: {}", e);
+                                std::process::exit(1);
+                            });
+                    let nc_output = nc::bridge::generate_nc(
+                        &base_lua, &pp_lua, &blocks, &name, units_str,
+                    )
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error generating NC: {}", e);
+                        std::process::exit(1);
+                    });
+
+                    // Output to file or stdout
+                    match &cli.output {
+                        Some(output_path) => {
+                            std::fs::write(output_path, &nc_output).unwrap_or_else(
+                                |e| {
+                                    eprintln!("Error writing output: {}", e);
+                                    std::process::exit(1);
+                                },
+                            );
+                            println!("Written to {}", output_path);
+                        }
+                        None => print!("{}", nc_output),
+                    }
+                }
                 Err(e) => {
                     tracing::error!("{}", e);
                     std::process::exit(1);

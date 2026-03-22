@@ -41,6 +41,7 @@ pub fn compile_manual_drill(
     blocks.push(NCBlock::SpindleOff);
     blocks.push(NCBlock::ProgramEnd {
         name: String::from(program_name),
+        units: String::from(units),
     });
     blocks
 }
