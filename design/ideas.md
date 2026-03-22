@@ -2,8 +2,7 @@
 
 ## inbox
 
-*(empty)*
-
+* Toolpath calculations will be multithreaded.
 
 ---
 

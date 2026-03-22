@@ -1,6 +1,6 @@
+use super::ir::NCBlock;
 use crate::core::tool::Tool;
 use crate::core::toolpath::ToolpathSegment;
-use crate::nc::ir::NCBlock; // or use super::ir::NCBlock
 
 pub fn compile_manual_drill(
     program_name: &str,
@@ -15,7 +15,7 @@ pub fn compile_manual_drill(
             units: String::from(units),
         },
         NCBlock::ToolChange {
-            tool_number: tool.tool_number,
+            tool_number: Some(tool.tool_number),
             spindle_speed: tool.spindle_speed,
         },
         NCBlock::Comment {

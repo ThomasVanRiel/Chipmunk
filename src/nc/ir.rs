@@ -7,7 +7,7 @@ pub enum NCBlock {
         units: String,
     },
     ToolChange {
-        tool_number: u32,
+        tool_number: Option<u32>,
         spindle_speed: f64,
     },
     Comment {
