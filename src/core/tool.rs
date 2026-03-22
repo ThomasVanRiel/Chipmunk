@@ -13,4 +13,5 @@ pub struct Tool {
     pub name: String,
     pub diameter: f64,
     pub spindle_speed: f64,
+    pub spindle_direction: SpindleDirection,
 }

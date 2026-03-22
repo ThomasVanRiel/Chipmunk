@@ -1,6 +1,5 @@
 use chipmunk::io::job::load_job;
 use clap::Parser;
-use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "chipmunk", about = "CLI CAM tool")]
