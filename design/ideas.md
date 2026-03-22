@@ -27,6 +27,9 @@ Before spindle on, emit a comment line (e.g. `; ENABLE SINGLE BLOCK MODE FOR MAN
 **`--plot` flag for toolpath SVG output**
 `--plot <path>` generates an SVG of toolpaths alongside normal NC generation (e.g. `chipmunk job.yaml --output part.H --plot toolpaths.svg`). Reflects the same operations as the NC output — respects `--tool` and `--color` filters. SVG contains separate layers (`<g>` groups) for original geometry, stock outline, and toolpaths, so they can be toggled in an SVG viewer. Color coded by operation. Within each operation color, rapids are dashed lines, feeds are solid.
 
+**Drill point patterns**
+`points:` accepts explicit `[x, y]` coordinates alongside pattern definitions: `circle_pattern` (center, radius, count, optional start_angle default 0), `line_pattern` (start, end, count or spacing — providing both is a hard error), `rect_pattern` (corner, spacing, count as `[columns, rows]`, optional angle default 0). Patterns are preserved through the IR — not flattened early — so post-processors can emit native pattern support (e.g. Heidenhain `PATTERN DEF`). `base.lua` provides `M.expand_patterns(blocks)` for post-processors without native support. Phase 2.
+
 **Color mismatch is a hard error**
 If an SVG contains paths with a stroke color that has no matching operation in the job YAML, Chipmunk exits with a hard error (exit code 1). The user asks the impossible — never silently skip geometry.
 
