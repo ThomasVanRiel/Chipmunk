@@ -21,13 +21,12 @@ M.supported_cycles = {}
 -- Chipmunk prints the error message to stderr and exits with code 1
 -- Use the error for machine specific validation (overtravel, unsupported cycles)
 -- Error content is free form, no structure is imposed
--- TODO: Add line numbers to the NC program
 function M.generate(blocks, context)
 	-- Prepare table to store all lines of the NC program
 	local lines = {}
 
 	-- Preamble
-	lines[#lines + 1] = "BEGIN PGM " .. context.name .. " " .. context.units
+	lines[#lines + 1] = "0 BEGIN PGM " .. context.name .. " " .. context.units
 	-- block form?
 
 	-- NC Blocks
@@ -35,13 +34,13 @@ function M.generate(blocks, context)
 		-- match all blocks and append to lines
 		local line = M.format_block(block)
 		if line then
-			lines[#lines + 1] = line
+			lines[#lines + 1] = #lines .. " " .. line
 		end
 	end
 
 	-- Postamble
 	-- TODO: Add retract to home? Add M30?
-	lines[#lines + 1] = "END PGM " .. context.name .. " " .. context.units
+	lines[#lines + 1] = #lines .. " END PGM " .. context.name .. " " .. context.units
 
 	return table.concat(lines, "\n")
 end
@@ -61,21 +60,31 @@ function M.format_block(block)
 		return ""
 	elseif block.type == "rapid" then
 		local line = "L"
-		-- TODO: extract to separate function as linear feed will have same logic
-		if block.x then
-			line = line .. HhCoord(" X", block.x)
-		end
-		if block.y then
-			line = line .. HhCoord(" Y", block.y)
-		end
-		if block.z then
-			line = line .. HhCoord(" Z", block.z)
-		end
+		line = line .. M.format_coords(block)
 		line = line .. " FMAX"
 		return line
 	end
 	-- Unknown block
 	return nil
+end
+
+function M.format_coords(block)
+	local line = ""
+	if block.x then
+		line = line .. " " .. M.hh_coord("X", block.x)
+	end
+	if block.y then
+		line = line .. " " .. M.hh_coord("Y", block.y)
+	end
+	if block.z then
+		line = line .. " " .. M.hh_coord("Z", block.z)
+	end
+	return line
+end
+
+function M.hh_coord(axis, value)
+	local sign = value >= 0 and "+" or ""
+	return axis .. sign .. Fmt(value, 3)
 end
 
 return M

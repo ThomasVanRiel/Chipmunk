@@ -14,7 +14,7 @@ path = "src/bin/chipmunk.rs"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-mlua = { version = "0.11", features = ["lua55", "vendored", "anyhow"] }
+mlua = { version = "0.11", features = ["lua54", "vendored", "anyhow"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 anyhow = "1"
