@@ -1,6 +1,6 @@
 -- postprocessors/heidenhain.lua
--- -- Load base module with helper functions
--- local base = require("base")
+-- Base module with helper functions is automatically loaded
+-- `local base = require("base")` is not required (nor allowed)
 
 -- Define module to return formatted NC code to Chipmunk
 local M = {}
@@ -26,7 +26,7 @@ function M.generate(blocks, context)
 	local lines = {}
 
 	-- Preamble
-	-- (None for heidenhain)
+	lines[#lines + 1] = "BEGIN PGM " .. context.name .. " " .. context.units
 
 	-- NC Blocks
 	for _, block in ipairs(blocks) do
@@ -39,16 +39,13 @@ function M.generate(blocks, context)
 
 	-- Postamble
 	-- (None for heidenhain)
+	lines[#lines + 1] = "END PGM " .. context.name .. " " .. context.units
 
 	return table.concat(lines, "\n")
 end
 
 function M.format_block(block)
-	if block.type == "program_start" then
-		return "BEGIN PGM " .. block.name .. " " .. block.units
-	elseif block.type == "program_end" then
-		return "END PGM " .. block.name .. " " .. block.units
-	elseif block.type == "tool_change" then
+	if block.type == "tool_change" then
 		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed
 	elseif block.type == "comment" then
 		return "; " .. block.comment

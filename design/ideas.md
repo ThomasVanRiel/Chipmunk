@@ -3,6 +3,9 @@
 ## inbox
 
 * Toolpath calculations will be multithreaded.
+* Pocket definitions in yaml? Some canned cycles support this.
+* Postamble and preamble is not part of the IR. Program start and program end should not be IR blocks.
+* CAD -> CAM, maar ook CAM -> CAD
 
 ---
 

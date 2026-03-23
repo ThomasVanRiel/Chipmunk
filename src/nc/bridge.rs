@@ -21,7 +21,7 @@ pub fn generate_nc(
 
     // Create the context table
     let context = lua.create_table()?;
-    context.set("program_name", program_name)?;
+    context.set("name", program_name)?;
     context.set("units", units)?;
 
     // Convert the blocks to lua table
@@ -44,13 +44,6 @@ pub fn generate_nc(
 fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
     let table = lua.create_table()?;
     match block {
-        // TODO: Name and units should be passed to PP as context, not in blocks.
-        // As a matter of fact, they already are. We should use them.
-        NCBlock::ProgramStart { name, units } => {
-            table.set("type", "program_start")?;
-            table.set("name", name.as_str())?;
-            table.set("units", units.as_str())?;
-        }
         NCBlock::ToolChange {
             tool_number,
             spindle_speed,
@@ -85,11 +78,6 @@ fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
             table.set("x", *x)?;
             table.set("y", *y)?;
             table.set("z", *z)?;
-        }
-        NCBlock::ProgramEnd { name, units } => {
-            table.set("type", "program_end")?;
-            table.set("name", name.as_str())?;
-            table.set("units", units.as_str())?;
         }
         #[allow(unreachable_patterns)]
         _ => {
