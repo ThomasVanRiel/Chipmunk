@@ -6,6 +6,13 @@
 * Pocket definitions in yaml? Some canned cycles support this.
 * Postamble and preamble is not part of the IR. Program start and program end should not be IR blocks.
 * CAD -> CAM, maar ook CAM -> CAD
+* Maybe using subcommands is better for consistency, with a shortcut if a file is the first command?
+  * `chipmunk run <args>` or `chipmunk <args>`
+  * `chipmunk postprocessors`: but how can we emit pp capabilities (e.g. canned cycles)?
+  * `chipmunk check`
+  * `chipmunk serve`
+  * `chipmunk tools`: list available tools with their origin and properties
+* Add option to add M0 or M1 between operations
 
 ---
 
