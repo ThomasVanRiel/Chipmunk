@@ -13,6 +13,7 @@
   * `chipmunk serve`
   * `chipmunk tools`: list available tools with their origin and properties
 * Add option to add M0 or M1 between operations
+* It should be clearer from docs that the intent of this project is to be a CAM kernel, not only a CLI tool.
 
 ---
 

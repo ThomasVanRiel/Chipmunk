@@ -351,7 +351,9 @@ impl OperationType for FacingOperation {
 
 ### DrillOperation: compile_nc in Practice
 
-Drill is the primary operation that overrides `compile_nc`. It reads cycle parameters directly from `op` — it does not reconstruct them from the generated move sequence:
+Drill is the primary operation that overrides `compile_nc`. Every drill strategy — including manual — returns `Some(blocks)` from `compile_nc`. This is because all drill strategies produce IR that differs structurally from generic toolpath-to-NCBlock conversion: manual drill needs Comment + Stop, cycle-based strategies need CycleDefine/CycleCall, etc. The `generate()` method still produces explicit moves for visualization and as the universal fallback.
+
+The strategy is a field on the operation, not a separate type. One `DrillOperation` struct handles all strategies via a match on `op.drill_strategy`:
 
 ```rust
 // src/toolpath/drill.rs
@@ -365,85 +367,187 @@ impl OperationType for DrillOperation {
     {
         // Always produces explicit rapid/linear moves — used for visualization
         // and as fallback when post-processor has no cycle support.
-        // ...
+        // All strategies share the same XY point list; they differ in Z motion.
+        match op.drill_strategy {
+            DrillStrategy::Manual => {
+                // Rapids at clearance height only — no Z plunge
+                manual_drill_toolpath(&op.drill_points(), op.clearance_z)
+            }
+            DrillStrategy::Simple => {
+                // Rapid to clearance, feed to depth, retract — per point
+                simple_drill_toolpath(&op.drill_points(), op.final_depth, op.clearance_z, op.plunge_rate)
+            }
+            DrillStrategy::Peck => {
+                // Rapid to clearance, peck in increments, full retract between pecks — per point
+                peck_drill_toolpath(&op.drill_points(), op.final_depth, op.clearance_z, op.plunge_rate, op.peck_depth)
+            }
+            // ... bore, tap, chip_break
+        }
     }
 
     fn compile_nc(&self, op: &Operation, caps: &PostProcessorCapabilities)
         -> Option<Vec<NCBlock>>
     {
-        // Emit cycle blocks unless the user explicitly opted out (use_canned_cycle defaults to true).
-        // Post-processor capability is checked below; if unsupported, caller falls back to explicit moves.
-        if !op.use_canned_cycle { return None; }
-
-        let cycle_type = match op.drill_type {
-            DrillType::Simple => "drill",
-            DrillType::Peck   => "peck_drill",
-            DrillType::Spot   => "spot_drill",
-            DrillType::Bore   => "bore",
-            DrillType::Tap    => "tap",
-        };
-
-        // If the post-processor can't handle this cycle, return None —
-        // the compiler falls back to generic explicit-move conversion.
-        if !caps.supported_cycles.contains(cycle_type) { return None; }
-
-        let mut blocks = vec![];
-
-        // One CycleDefine with all parameters taken directly from op.
-        // No pattern matching on generated moves needed.
-        blocks.push(NCBlock {
-            block_type: BlockType::CycleDefine,
-            params: hashmap! {
-                "cycle_type" => json!(cycle_type),
-                "z"          => json!(op.final_depth),
-                "r"          => json!(op.r_plane()),        // start_depth + clearance
-                "f"          => json!(op.plunge_rate),
-                "q"          => json!(op.peck_depth),       // None for non-peck types
-                "pitch"      => json!(op.tap_pitch),        // None for non-tap types
-            },
-        });
-
-        // One CycleCall per drill point
-        for point in op.drill_points() {
-            blocks.push(NCBlock {
-                block_type: BlockType::CycleCall,
-                params: hashmap! { "x" => json!(point.x), "y" => json!(point.y) },
-            });
+        match op.drill_strategy {
+            DrillStrategy::Manual => Some(compile_manual_drill(op)),
+            _ => compile_canned_drill(op, caps),
         }
-
-        blocks.push(NCBlock { block_type: BlockType::CycleOff, params: hashmap!{} });
-
-        Some(blocks)
     }
 }
+
+/// Manual drill: Comment + Stop (acknowledge), then rapid to each XY at clearance.
+/// No canned cycle — every post-processor handles these basic blocks.
+fn compile_manual_drill(op: &Operation) -> Vec<NCBlock> {
+    let mut blocks = vec![
+        NCBlock::comment("ENABLE SINGLE BLOCK MODE FOR MANUAL QUILL DRILLING"),
+        NCBlock::stop(),
+    ];
+    for point in op.drill_points() {
+        blocks.push(NCBlock::rapid(Some(point.x), Some(point.y), Some(op.clearance_z)));
+    }
+    blocks
+}
+
+/// Cycle-based strategies (simple, peck, bore, tap, spot, chip_break).
+/// Returns Some(blocks) if the post-processor supports the cycle type,
+/// None to fall back to explicit moves from generate().
+fn compile_canned_drill(op: &Operation, caps: &PostProcessorCapabilities) -> Option<Vec<NCBlock>> {
+    // If the user explicitly opted out of canned cycles, fall back to explicit moves.
+    if !op.use_canned_cycle { return None; }
+
+    let cycle_type = match op.drill_strategy {
+        DrillStrategy::Simple    => "drill",
+        DrillStrategy::Peck      => "peck_drill",
+        DrillStrategy::Spot      => "spot_drill",
+        DrillStrategy::Bore      => "bore",
+        DrillStrategy::Tap       => "tap",
+        DrillStrategy::ChipBreak => "chip_break",
+        DrillStrategy::Manual    => unreachable!(), // handled above
+    };
+
+    // If the post-processor can't handle this cycle, return None —
+    // the compiler falls back to generic explicit-move conversion.
+    if !caps.supported_cycles.contains(&cycle_type.to_string()) { return None; }
+
+    let mut blocks = vec![];
+
+    // One CycleDefine with all parameters taken directly from op.
+    // No pattern matching on generated moves needed.
+    blocks.push(NCBlock {
+        block_type: BlockType::CycleDefine,
+        params: hashmap! {
+            "cycle_type" => json!(cycle_type),
+            "z"          => json!(op.final_depth),
+            "r"          => json!(op.r_plane()),        // start_depth + clearance
+            "f"          => json!(op.plunge_rate),
+            "q"          => json!(op.peck_depth),       // None for non-peck types
+            "pitch"      => json!(op.tap_pitch),        // None for non-tap types
+        },
+    });
+
+    // One CycleCall per drill point
+    for point in op.drill_points() {
+        blocks.push(NCBlock {
+            block_type: BlockType::CycleCall,
+            params: hashmap! { "x" => json!(point.x), "y" => json!(point.y) },
+        });
+    }
+
+    blocks.push(NCBlock { block_type: BlockType::CycleOff, params: hashmap!{} });
+
+    Some(blocks)
+}
+```
+
+### Why compile_nc returns Some for all drill strategies
+
+The `compile_nc` → `None` → `compile_toolpath_generic` fallback path works well for milling operations (facing, profile, pocket) where the IR is a direct 1:1 mapping of toolpath segments to NCBlocks. Drilling is different:
+
+| Strategy | Why generic conversion doesn't work |
+|---|---|
+| Manual | Needs `Comment` + `Stop` blocks that have no toolpath segment equivalent |
+| Simple/Peck/Bore/Tap | Needs `CycleDefine` + `CycleCall` — a fundamentally different IR structure |
+| All strategies | The explicit moves from `generate()` are the fallback *within* `compile_nc` (via returning `None` from `compile_canned_drill`), not the primary path |
+
+The flow for drilling:
+
+```
+compile_nc() called
+  ├── Manual?  → always returns Some(Comment + Stop + Rapids)
+  └── Cycle-based?
+        ├── PP supports cycle? → Some(CycleDefine + CycleCalls)
+        └── PP doesn't?        → None → compiler uses generate() fallback
 ```
 
 ### NC Compiler Orchestration
 
-The compiler calls `compile_nc` before the generic path. The operation type decides; the compiler just orchestrates:
+The compiler separates the **envelope** (tool change, spindle, coolant, clearance — shared by all operations) from the **body** (operation-specific blocks). The operation type's `compile_nc` provides the body; the compiler wraps it.
 
 ```rust
 // src/nc/compiler.rs
 
-pub fn compile_operation(
-    op: &Operation,
-    toolpath: &Toolpath,
+/// Compile a full NC program from a list of operations.
+pub fn compile_program(
+    operations: &[Operation],
+    toolpaths: &HashMap<OperationId, Toolpath>,
     caps: &PostProcessorCapabilities,
+    context: &ProgramContext,
+) -> Vec<NCBlock> {
+    let mut blocks = vec![];
+    blocks.extend(compile_program_header(context));
+
+    for (i, op) in operations.iter().enumerate() {
+        let toolpath = toolpaths.get(&op.id);
+        blocks.extend(compile_operation(op, toolpath, caps, i == operations.len() - 1));
+    }
+
+    blocks.push(NCBlock::program_end());
+    blocks
+}
+
+/// Compile a single operation: envelope + body.
+fn compile_operation(
+    op: &Operation,
+    toolpath: Option<&Toolpath>,
+    caps: &PostProcessorCapabilities,
+    is_last: bool,
 ) -> Vec<NCBlock> {
     let mut blocks = vec![];
 
-    // Preamble: tool change, spindle, coolant, rapid to clearance
-    blocks.extend(compile_preamble(op));
+    // === Envelope: preamble ===
+    // Tool change (includes spindle speed for Heidenhain TOOL CALL)
+    blocks.push(NCBlock::tool_change(op.tool.tool_number, op.tool.spindle_speed));
+    // Spindle on
+    blocks.push(NCBlock::spindle_on(op.tool.spindle_direction));
+    // Coolant (if enabled)
+    if let Some(coolant) = &op.coolant {
+        blocks.push(NCBlock::coolant_on(coolant));
+    }
+    // Rapid to clearance height
+    blocks.push(NCBlock::rapid(None, None, Some(op.clearance_z)));
 
-    // Core: operation-specific path OR generic segment conversion
-    let core = registry::get(&op.operation_type)
+    // === Body: operation-specific blocks ===
+    let body = registry::get(&op.operation_type)
         .and_then(|plugin| plugin.compile_nc(op, caps))
-        .unwrap_or_else(|| compile_toolpath_generic(op, toolpath));
+        .unwrap_or_else(|| {
+            // Generic fallback: convert toolpath segments 1:1 to NCBlocks.
+            // Used for facing, profile, pocket, and drill without cycle support.
+            match toolpath {
+                Some(tp) => compile_toolpath_generic(op, tp),
+                None => vec![], // No toolpath generated — nothing to emit
+            }
+        });
+    blocks.extend(body);
 
-    blocks.extend(core);
-
-    // Postamble: rapid to clearance, spindle off if last op for this tool
-    blocks.extend(compile_postamble(op));
+    // === Envelope: postamble ===
+    // Rapid to clearance height
+    blocks.push(NCBlock::rapid(None, None, Some(op.clearance_z)));
+    // Spindle off
+    blocks.push(NCBlock::spindle_off());
+    // Coolant off (if it was on)
+    if op.coolant.is_some() {
+        blocks.push(NCBlock::coolant_off());
+    }
 
     blocks
 }
@@ -459,6 +563,8 @@ fn compile_toolpath_generic(op: &Operation, toolpath: &Toolpath) -> Vec<NCBlock>
     }).collect()
 }
 ```
+
+The envelope/body split means adding a new operation type never requires touching the compiler. The `compile_nc` method on the operation type returns only the body blocks — the compiler handles everything else.
 
 ### Full Export Sequence
 
@@ -528,6 +634,20 @@ NC export (`POST /api/project/export`) runs `compile_program` → `generate_nc_c
 5. Add integration tests in `tests/`
 
 The API, frontend property panel, and NC compiler all derive their behavior from the registry — no other files need to change.
+
+### Adding a New Drill Strategy
+
+Adding a new drill strategy (e.g., chip break) is lighter than adding a new operation type — it's a new variant within the existing `DrillOperation`:
+
+1. Add the variant to `DrillStrategy` enum in `core/operation.rs`
+2. Add the YAML `strategy:` value mapping
+3. In `toolpath/drill.rs`:
+   - Add a `chip_break_drill_toolpath()` function returning `Vec<ToolpathSegment>` (explicit moves for visualization/fallback)
+   - Add the match arm in `DrillOperation::generate()`
+   - Add the cycle type mapping in `compile_canned_drill()` (if it maps to a canned cycle)
+4. Add integration tests
+
+No changes needed in the compiler, post-processors, or bridge. The envelope handles tool change/spindle/coolant. The post-processor already knows how to format the cycle type (or falls back to explicit moves if it doesn't).
 
 ### Validation Philosophy
 
