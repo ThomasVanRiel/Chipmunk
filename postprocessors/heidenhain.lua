@@ -21,12 +21,14 @@ M.supported_cycles = {}
 -- Chipmunk prints the error message to stderr and exits with code 1
 -- Use the error for machine specific validation (overtravel, unsupported cycles)
 -- Error content is free form, no structure is imposed
+-- TODO: Add line numbers to the NC program
 function M.generate(blocks, context)
 	-- Prepare table to store all lines of the NC program
 	local lines = {}
 
 	-- Preamble
 	lines[#lines + 1] = "BEGIN PGM " .. context.name .. " " .. context.units
+	-- block form?
 
 	-- NC Blocks
 	for _, block in ipairs(blocks) do
@@ -38,7 +40,7 @@ function M.generate(blocks, context)
 	end
 
 	-- Postamble
-	-- (None for heidenhain)
+	-- TODO: Add retract to home? Add M30?
 	lines[#lines + 1] = "END PGM " .. context.name .. " " .. context.units
 
 	return table.concat(lines, "\n")

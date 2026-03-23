@@ -6,7 +6,9 @@ Open source CAM for people who own a machine and want to cut parts — not subsc
 
 ## What is this?
 
-Chipmunk takes a drawing (SVG or DXF) and a short parameter file, and produces NC programs ready to run on your machine. No cloud. No licence fee. No feature locked behind a tier.
+Chipmunk is a CAM kernel — a library for toolpath generation and NC compilation — with a CLI as its primary interface. Give it a drawing (SVG or DXF) and a short parameter file, and it produces NC programs ready to run on your machine. No cloud. No licence fee. No feature locked behind a tier.
+
+The same core library powers a REST API and a planned browser frontend.
 
 Currently supports **drilling and milling (2.5D)**. Turning is on the roadmap.
 
@@ -52,10 +54,11 @@ If you run a production workshop, use professional tooling. This project is prob
 
 Good CAM software is either:
 
-- **Expensive** — commercial tools cost thousands per year
-- **Cloud-locked** — Fusion 360 now requires a subscription and an internet connection to save your own files
-- **Abandonware** — older open source tools are unmaintained or painful to set up
-- **G-code only** — most open source CAM assumes LinuxCNC or Grbl; Heidenhain conversational is an afterthought or missing entirely
+- **Expensive** - commercial tools cost thousands per year
+- **Cloud-locked** - Fusion 360 now requires a subscription and an internet connection to save your own files
+- **Limited** - tool path generations are not flexible enough to machine effectively
+- **Abandonware** - older open source tools are unmaintained or painful to set up
+- **G-code only** - most open source CAM assumes LinuxCNC or Grbl; Heidenhain conversational is an afterthought or missing entirely
 
 Chipmunk is none of those things.
 
@@ -110,13 +113,13 @@ See `usage.md` for a full worked example with NC output.
 
 ## Current status
 
-**Pre-implementation.** The design is complete; code is being written now.
+**Phase 1 — in progress.** Manual drilling with explicit points in YAML works end-to-end: YAML job file → toolpath → Heidenhain NC output. The Heidenhain post-processor produces valid conversational code. Hardware testing is next.
 
 Planned phases:
 
-1. **Scaffolding + import** — SVG/DXF parsing, color grouping, REST API skeleton
-2. **Manual drill** — rapid to XY positions, operator drills by hand in single block mode. First real hardware test.
-3. **Automatic drill cycles** — peck drilling, canned cycles (CYCL DEF 203), YAML-driven jobs
+1. **Scaffolding + manual drill** — explicit XY points in YAML, Heidenhain post-processor, CLI output *(in progress)*
+2. **Automatic drill cycles** — peck drilling, canned cycles (CYCL DEF 203), multi-tool jobs, Haas post-processor
+3. **SVG/DXF import** — geometry-driven operations via stroke color mapping
 4. **2.5D milling** — profiles, pockets, facing from SVG color workflow
 
 A browser frontend (geometry selection, toolpath preview) is planned but deferred — the CLI gets you a working tool first, and a visual interface will follow once the core is solid.
@@ -134,6 +137,22 @@ A browser frontend (geometry selection, toolpath preview) is planned but deferre
 **Post-processors are Lua scripts.** Small, readable, and easy to extend. The toolpath logic and the NC formatting are completely separate — adding support for a new controller means writing a Lua file, not modifying the core. Heidenhain TNC is the primary built-in; a Haas example is included as a starting point for other controllers.
 
 **CLI first.** The tool works entirely from the command line — pass a YAML job file directly to the binary. A REST API exists as a peer interface for scripting and a future browser UI, but you never need it.
+
+---
+
+## Contributing
+
+Contributing does not mean writing Rust. Some of the most useful contributions have nothing to do with code:
+
+- **Share your thoughts.** Open an issue to discuss ideas, question a design choice, or describe a workflow you wish existed. That kind of input shapes the project more than you might think.
+- **Request features.** If you need something Chipmunk doesn't do, say so. A clear description of what you need and why is a genuine contribution.
+- **Report controller quirks.** If NC output looks wrong for your machine, file an issue. Include what the output was, what you expected, and what controller you're targeting.
+- **Share job files.** Real-world YAML examples expose edge cases and help validate the design.
+- **Improve documentation.** Fix unclear descriptions, add examples, or point out where something doesn't make sense.
+
+If you want to write code but don't have experience in Rust, there are good entry points that don't require touching the core. Try writing a post-processor — they are Lua scripts, a small and simple language chosen specifically so that adding support for a new controller is approachable. Writing integrations with external software (e.g. OpenSCAD bindings, an Onshape plugin, a FreeCAD macro) is also hugely valuable and can be done in whatever language that ecosystem uses. Look at the Heidenhain post-processor for an example of a post-processor, and see `DESIGN.md` for the planned integration architecture.
+
+**Do not run untested output on a real machine.** The project is in early development and the generated NC code has not been validated on hardware. Review all output carefully before putting it anywhere near a spindle.
 
 ---
 
