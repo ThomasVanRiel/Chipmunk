@@ -32,7 +32,12 @@ pub fn generate_nc(
 
     // Call the generate function of the postprocessor to return the NC program
     let generate_function = pp.get::<LuaFunction>("generate")?;
-    let result = generate_function.call::<String>((blocks_table, context))?;
+    let mut result = generate_function.call::<String>((blocks_table, context))?;
+
+    // Add a newline to terminate the string if the postprocessor did not add one
+    if !result.ends_with("\n") {
+        result.push('\n');
+    }
     Ok(result)
 }
 

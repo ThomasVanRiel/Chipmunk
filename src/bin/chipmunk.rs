@@ -1,5 +1,5 @@
 use chipmunk::{
-    core::{toolpath::ToolpathSegment, units},
+    core::toolpath::ToolpathSegment,
     io::job::load_job,
     nc::{self, ir::NCBlock},
 };
@@ -20,7 +20,9 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
     tracing::info!("Starting chipmunk");
     match cli.input.as_deref() {
         Some("postprocessors") => {
