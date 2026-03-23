@@ -35,6 +35,8 @@ function M.generate(blocks, context)
 		local line = M.format_block(block)
 		if line then
 			lines[#lines + 1] = #lines .. " " .. line
+		else
+			return nil, "unimplemented block: " .. tostring(block.type)
 		end
 	end
 

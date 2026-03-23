@@ -32,13 +32,40 @@ pub fn generate_nc(
 
     // Call the generate function of the postprocessor to return the NC program
     let generate_function = pp.get::<LuaFunction>("generate")?;
-    let mut result = generate_function.call::<String>((blocks_table, context))?;
+    let mut result: LuaMultiValue = generate_function.call((blocks_table, context))?;
 
-    // Add a newline to terminate the string if the postprocessor did not add one
-    if !result.ends_with("\n") {
-        result.push('\n');
+    let first = result
+        .pop_front()
+        .ok_or_else(|| anyhow::anyhow!("Postprocessor returned no values"))?;
+
+    // Extensive error handling because the postprocessor is external.
+    // We support development as much as possible
+    match first {
+        LuaValue::String(s) => {
+            // Success, postprocessor returned a string, we trust it is the full NC program
+            let mut nc = s.to_str()?.to_string();
+            // Add a newline to terminate the string if the postprocessor did not add one
+            if !nc.ends_with("\n") {
+                nc.push('\n');
+            }
+            Ok(nc)
+        }
+        LuaValue::Nil => {
+            // Error: postprocessor returned `nil, str`
+            let msg = result
+                .pop_front()
+                .and_then(|v| match v {
+                    LuaValue::String(s) => s.to_str().ok().map(|s| s.to_string()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "unknown postprocessor error".to_string());
+            Err(anyhow::anyhow!("{}", msg))
+        }
+        other => Err(anyhow::anyhow!(
+            "Postprocessor returned unexpected type: {}",
+            other.type_name()
+        )),
     }
-    Ok(result)
 }
 
 fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
