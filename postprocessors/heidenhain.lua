@@ -27,7 +27,7 @@ function M.generate(blocks, context)
 
 	-- Preamble
 	lines[#lines + 1] = "0 BEGIN PGM " .. context.name .. " " .. context.units
-	-- block form?
+	-- block form? Check context if stock is provided.
 
 	-- NC Blocks
 	for _, block in ipairs(blocks) do
@@ -36,7 +36,7 @@ function M.generate(blocks, context)
 		if line then
 			lines[#lines + 1] = #lines .. " " .. line
 		else
-			return nil, "unimplemented block: " .. tostring(block.type)
+			return nil, "unimplemented block: " .. block.type
 		end
 	end
 
@@ -47,15 +47,22 @@ function M.generate(blocks, context)
 	return table.concat(lines, "\n")
 end
 
+-- TODO: Should we return an object instead of a string? M3 and M5 are merged with the next blocks.
+-- We return nil anyway on unimplemented blocks.
+-- Returning a stack like object that is sent to all future blocks so they can check if they need to postfix commands.
+-- > Q: What about retroactive commands? Do some commands need to edit program history?
 function M.format_block(block)
 	if block.type == "tool_change" then
 		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed
 	elseif block.type == "comment" then
+		-- TODO: "* <comment>" is also a valid comment block, when to use what comment type?
 		return "; " .. block.comment
 	elseif block.type == "stop" then
 		return "M0"
 	elseif block.type == "spindle_on" then
 		-- TODO: tricky block as it is merged with the next rapid
+		-- > Q: But what if there is no rapid programmed before the next cut?
+		-- > A: Activate M3 with dummy line before move? We need to check!
 		return ""
 	elseif block.type == "spindle_off" then
 		-- TODO: tricky block as it is merged with the next rapid
