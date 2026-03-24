@@ -14,16 +14,20 @@ pub enum NCBlock {
     SpindleOn {
         direction: SpindleDirection,
     },
+    Retract {
+        height: f64,
+    },
+    RetractFull,
     Rapid {
-        x: Option<f64>,
-        y: Option<f64>,
-        z: Option<f64>,
+        x: f64,
+        y: f64,
+        z: f64,
     },
     Linear {
-        x: Option<f64>,
-        y: Option<f64>,
-        z: Option<f64>,
-        feed: Option<f64>,
+        x: f64,
+        y: f64,
+        z: f64,
+        feed: f64,
     },
     SpindleOff,
 }

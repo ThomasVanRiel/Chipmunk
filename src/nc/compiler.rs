@@ -21,19 +21,21 @@ pub fn compile_manual_drill(
         NCBlock::SpindleOn {
             direction: tool.spindle_direction,
         },
-        NCBlock::Rapid {
-            x: None,
-            y: None,
-            z: Some(clearance_z),
+        NCBlock::Retract {
+            height: clearance_z,
         },
     ];
     for segment in segments {
         blocks.push(NCBlock::Rapid {
-            x: Some(segment.x),
-            y: Some(segment.y),
-            z: Some(clearance_z),
+            x: segment.x,
+            y: segment.y,
+            z: clearance_z,
         });
     }
-    blocks.push(NCBlock::SpindleOff);
+    blocks.push(NCBlock::Retract {
+        height: clearance_z,
+    });
+    // SpindleOff optional, program end automatically stops spindle.
+    // blocks.push(NCBlock::SpindleOff);
     blocks
 }

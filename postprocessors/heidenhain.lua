@@ -41,7 +41,8 @@ function M.generate(blocks, context)
 	end
 
 	-- Postamble
-	-- TODO: Add retract to home? Add M30?
+	-- TODO: Add M30?
+	lines[#lines + 1] = #lines .. " M30"
 	lines[#lines + 1] = #lines .. " END PGM " .. context.name .. " " .. context.units
 
 	return table.concat(lines, "\n")
@@ -63,11 +64,20 @@ function M.format_block(block)
 	elseif block.type == "spindle_on" then
 		-- TODO: tricky block as it is merged with the next rapid
 		-- > Q: But what if there is no rapid programmed before the next cut?
-		-- > A: Activate M3 with dummy line before move? We need to check!
-		return ""
+		-- > A: For now, we activate the spindle with a dummy line
+		return "L M3"
 	elseif block.type == "spindle_off" then
-		-- TODO: tricky block as it is merged with the next rapid
-		return ""
+		-- TODO: tricky block as it is merged with the next (or previous in some cases) rapid
+		-- For now, we stop the spindle with a dummy line
+		return "L M5"
+	elseif block.type == "retract" then
+		return "L " .. M.hh_coord("Z", block.z) .. " FMAX"
+	elseif block.type == "retract_full" then
+		-- Retract in machine coordinates to the top of the z-axis
+		return "L Z+0 R0 FMAX M92"
+	elseif block.type == "home" then
+		-- Retract in machine coordinates first, then home in the plane
+		return "L Z+0 R0 FMAX M92\nL X+0 Y+0 R0 FMAX M92"
 	elseif block.type == "rapid" then
 		local line = "L"
 		line = line .. M.format_coords(block)

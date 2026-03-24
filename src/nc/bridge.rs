@@ -105,6 +105,13 @@ fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
         NCBlock::SpindleOff => {
             table.set("type", "spindle_off")?;
         }
+        NCBlock::Retract { height } => {
+            table.set("type", "retract")?;
+            table.set("z", *height)?;
+        }
+        NCBlock::RetractFull => {
+            table.set("type", "retract_full")?;
+        }
         NCBlock::Rapid { x, y, z } => {
             table.set("type", "rapid")?;
             table.set("x", *x)?;
