@@ -19,5 +19,11 @@ pub enum NCBlock {
         y: Option<f64>,
         z: Option<f64>,
     },
+    Linear {
+        x: Option<f64>,
+        y: Option<f64>,
+        z: Option<f64>,
+        feed: Option<f64>,
+    },
     SpindleOff,
 }

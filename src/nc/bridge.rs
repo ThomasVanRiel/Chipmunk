@@ -111,6 +111,13 @@ fn block_to_lua(lua: &Lua, block: &NCBlock) -> LuaResult<LuaTable> {
             table.set("y", *y)?;
             table.set("z", *z)?;
         }
+        NCBlock::Linear { x, y, z, feed } => {
+            table.set("type", "rapid")?;
+            table.set("x", *x)?;
+            table.set("y", *y)?;
+            table.set("z", *z)?;
+            table.set("feed", *feed)?;
+        }
         #[allow(unreachable_patterns)]
         _ => {
             tracing::error!("Unsupported NCBlock: {:?}", block);

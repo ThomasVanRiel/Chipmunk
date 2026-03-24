@@ -97,8 +97,8 @@ Every block passed to `generate()` is a Lua table with a `type` field (string) a
 
 ### Design principles
 
-- Always output **complete** information in the IR blocks, the postprocessor needs as much information as possible.
-  - Coordinates are always provided, the postprocessor can optimize unchanged coordinates.
+- Always output as much information as possible in the IR blocks.
+  - Plane coordinates are always provided fully, the postprocessor can optimize unchanged coordinates. Height
   - Feed rate is always emitted in linear moves, the postprocessor can optimize.
 - Program start and end is machine specific, the postprocessor handles it.
 
