@@ -33,7 +33,7 @@ fn main() {
             match load_job(path) {
                 Ok(job) => {
                     // TODO: Replace this LLM generated placeholder implementation that was used to
-                    // test the function of the program
+                    // test the function of the program.
                     let pp = nc::postprocessors::find_postprocessor(&job.postprocessor);
                     let name: String = job.name.unwrap_or_else(|| {
                         Path::new(path)
@@ -73,6 +73,7 @@ fn main() {
                     );
 
                     // Load post-processor Lua files
+                    // TODO: Should we include the built in postprocessors in the binary?
                     let pp_path = pp.unwrap_or_else(|| {
                         eprintln!("Error: post-processor '{}' not found", job.postprocessor);
                         std::process::exit(1);
@@ -90,11 +91,15 @@ fn main() {
                     // Output to file or stdout
                     match &cli.output {
                         Some(output_path) => {
-                            std::fs::write(output_path, &nc_output).unwrap_or_else(|e| {
-                                eprintln!("Error writing output: {}", e);
-                                std::process::exit(1);
-                            });
-                            println!("Written to {}", output_path);
+                            if output_path == "-" {
+                                print!("{}", nc_output);
+                            } else {
+                                std::fs::write(output_path, &nc_output).unwrap_or_else(|e| {
+                                    eprintln!("Error writing output: {}", e);
+                                    std::process::exit(1);
+                                });
+                                println!("Written to {}", output_path);
+                            }
                         }
                         None => print!("{}", nc_output),
                     }

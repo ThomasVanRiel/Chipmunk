@@ -95,7 +95,12 @@ Cycle types: `"drill"`, `"peck_drill"`, `"spot_drill"`, `"bore"`, `"tap"`, `"chi
 
 Every block passed to `generate()` is a Lua table with a `type` field (string) and type-specific parameters. All parameter values are numbers or strings — no nested tables.
 
-Coordinates (`x`, `y`, `z`) are `nil` when unchanged from the previous block (modal optimization). Always check for `nil` before formatting.
+### Design principles
+
+- Always output **complete** information in the IR blocks, the postprocessor needs as much information as possible.
+  - Coordinates are always provided, the postprocessor can optimize unchanged coordinates.
+  - Feed rate is always emitted in linear moves, the postprocessor can optimize.
+- Program start and end is machine specific, the postprocessor handles it.
 
 ### Currently Implemented
 
