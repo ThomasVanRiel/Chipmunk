@@ -107,7 +107,7 @@ Run one command. Get NC output to stdout or `--output`, ready to transfer to the
 
 The SVG also doubles as a shop drawing — print it at 1:1 scale and bring it to the machine as a setup reference.
 
-See `usage.md` for a full worked example with NC output.
+See [docs/usage.md](docs/usage.md) for a full worked example with NC output.
 
 ---
 
