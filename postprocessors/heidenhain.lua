@@ -79,10 +79,7 @@ function M.format_block(block)
 		-- Retract in machine coordinates first, then home in the plane
 		return "L Z+0 R0 FMAX M92\nL X+0 Y+0 R0 FMAX M92"
 	elseif block.type == "rapid" then
-		local line = "L"
-		line = line .. M.format_coords(block)
-		line = line .. " FMAX"
-		return line
+		return "L " .. M.format_coords(block) .. " FMAX"
 	end
 	-- Unknown block
 	return nil
@@ -98,17 +95,17 @@ end
 -- Helper functions
 
 function M.format_coords(block)
-	local line = ""
+	local lines = {}
 	if block.x then
-		line = line .. " " .. M.hh_coord("X", block.x)
+		lines[#lines + 1] = M.hh_coord("X", block.x)
 	end
 	if block.y then
-		line = line .. " " .. M.hh_coord("Y", block.y)
+		lines[#lines + 1] = M.hh_coord("Y", block.y)
 	end
 	if block.z then
-		line = line .. " " .. M.hh_coord("Z", block.z)
+		lines[#lines + 1] = M.hh_coord("Z", block.z)
 	end
-	return line
+	return table.concat(lines, " ")
 end
 
 function M.hh_coord(axis, value)
