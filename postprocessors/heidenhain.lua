@@ -88,6 +88,15 @@ function M.format_block(block)
 	return nil
 end
 
+function M.CYCLE200(block)
+	local cycle = {}
+	cycle[#cycle + 1] = "CYCL DEF 200 DRILLING"
+	cycle[#cycle + 1] = "   Q200=" .. block.set_up_clearance .. ";SET-UP CLEARANCE"
+	return table.concat(cycle, " ~\n")
+end
+
+-- Helper functions
+
 function M.format_coords(block)
 	local line = ""
 	if block.x then

@@ -6,6 +6,7 @@
   * Maybe we can implement tolerances already in the operation definition. The tool path calculation can calculate the optimal path, maybe add flag `tolerance: [H7/-0.0+0.1]` and `tolerance_strategy: [wide/middle/narrow]`
 * Add IR block goto clearance? Going to max Z is useful. Clearance moves contain only Z, which allows IR moves (rapid/linear) to always contain ALL used coordinates (Omitting multi axis is fine for now).
 * Absolute vs relative moves? PP should handle this, as heidenhain uses I... while G-code uses G91 as a modal command.
+* Path planning using heidenhain is rather complex. How to send contour to canned cycles?
 
 ---
 
