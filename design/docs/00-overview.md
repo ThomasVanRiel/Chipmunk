@@ -2,9 +2,11 @@
 
 ## Purpose
 
-A CLI-first CAM (Computer-Aided Manufacturing) tool that generates NC code for CNC milling machines. Machining jobs are defined in YAML job files that reference SVG or DXF geometry; the tool exports controller-agnostic NC code through pluggable post-processors.
+A CAM (Computer-Aided Manufacturing) kernel for generating NC code for CNC milling machines. The core library — geometry, toolpaths, NC IR, post-processing — is a pure computational engine with no framework dependencies. Interfaces (CLI, REST API, browser frontend) are thin adapters over this kernel.
 
-The CLI is the primary and only interface for Phases 1–4. A REST API and browser frontend are deferred to the backlog — the architecture keeps them decoupled so they can be added later without refactoring.
+Machining jobs are defined in YAML job files that reference SVG or DXF geometry; the kernel exports controller-agnostic NC code through pluggable post-processors.
+
+The CLI is the primary and only interface for Phases 1–4. A REST API and browser frontend are deferred to the backlog — the kernel architecture keeps them decoupled so they can be added later without refactoring.
 
 ## High-Level Architecture
 

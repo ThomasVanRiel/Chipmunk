@@ -35,7 +35,7 @@ pub enum BlockType {
     Dwell,               // G4
     Stop,                // M0 — mandatory program stop
     OptionalStop,        // M1 — optional stop (operator switch)
-    ProgramEnd,          // M30/M2
+    // No ProgramEnd — preamble/postamble is post-processor responsibility
     SetUnits,            // G20/G21
     SetWorkOffset,       // G54-G59
     SetPlane,            // G17/G18/G19
@@ -97,7 +97,6 @@ The `mlua` bridge converts each `NCBlock` to a Lua table before calling the post
 { type = "comp_right",   d = 1 }
 { type = "comp_off" }
 { type = "dwell",        p = 0.5 }
-{ type = "program_end" }
 { type = "optional_skip_start", skip_level = 1, label = "SKIP1", operation_name = "Finish profile" }
 { type = "optional_skip_end",   skip_level = 1, label = "SKIP1" }
 ```
@@ -239,8 +238,6 @@ function M.format_block(block)
         return string.format("G42 D%02d", block.d)
     elseif block.type == "comp_off" then
         return "G40"
-    elseif block.type == "program_end" then
-        return "M30"
     elseif block.type == "optional_skip_start" then
         M._in_skip = true
         M._skip_prefix = block.skip_level > 1

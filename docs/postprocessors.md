@@ -136,7 +136,6 @@ These block types are defined in the design but not yet emitted. They will arriv
 | `comp_right` | `d` (offset register number) | Cutter compensation right (G42) |
 | `comp_off` | *(none)* | Cancel cutter compensation (G40) |
 | `optional_stop` | *(none)* | Optional stop (M1) |
-| `program_end` | *(none)* | Program end (M30/M2) |
 | `cycle_define` | `cycle_type`, `z`, `r`, `f`, `q` (nil if N/A), `pitch` (nil if N/A) | Define a canned cycle. Only sent if your PP declares the cycle type in `supported_cycles`. |
 | `cycle_call` | `x`, `y` | Execute the active cycle at this position |
 | `cycle_off` | *(none)* | Cancel the active cycle |
