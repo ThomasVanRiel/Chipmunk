@@ -3,6 +3,7 @@
 ## inbox
 
 * STEP NC support + bidirectional CAD↔CAM data flow. STEP-NC (ISO 14649) describes what to make rather than how to move — controllers optimize toolpaths, results can feed back to CAD. Massive scope expansion. Few controllers support it natively (Siemens SINUMERIK partial). GD&T interpretation alone is a project.
+  * Maybe we can implement tolerances already in the operation definition. The tool path calculation can calculate the optimal path, maybe add flag `tolerance: [H7/-0.0+0.1]` and `tolerance_strategy: [wide/middle/narrow]`
 
 ---
 
