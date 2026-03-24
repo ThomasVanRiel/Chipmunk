@@ -8,7 +8,7 @@ The built-in Heidenhain post-processor in `postprocessors/heidenhain.lua` is a w
 
 ## Quick Start
 
-1. Create a `.lua` file in `~/.config/chipmunk/postprocessors/` (Linux/macOS) or `%APPDATA%\chipmunk\postprocessors\` (Windows).
+1. Create a `.lua` file in one of the search directories (see [Discovery](#discovery) below).
 2. The filename (minus `.lua`) becomes the post-processor ID used in YAML job files.
 3. Return a module table with `name`, `file_extension`, and a `generate()` function.
 
@@ -69,13 +69,13 @@ Your Lua file must return a table. The required and optional fields:
 | `generate(blocks, context)` | function | yes | Takes IR blocks and context, returns NC code string. On error: return `nil, "message"`. |
 | `supported_cycles` | table | no | List of canned cycle type strings this PP handles. Omit for no cycle support. |
 | `optional_skip_strategy` | string | no | `"block_delete"` (default) or `"jump"`. Controls how optional operations are skipped. |
-| `format_block(block)` | function | no | Convenience — format a single block as one line. Not called by Chipmunk; use it from your own `generate()` if you want. |
 
 ### generate(blocks, context)
 
 This is the only function Chipmunk calls. It receives the full IR block list and a context table, and must return the complete NC program as a single string.
 
 **Return values:**
+
 - Success: return the NC string. A trailing newline is added automatically if missing.
 - Error: return `nil, "descriptive error message"`. Chipmunk prints the message to stderr and exits with code 1. Use this for machine-specific validation (overtravel, unsupported block type, etc.).
 
@@ -153,17 +153,23 @@ Planned additions: `num_tools`, `date`, `estimated_time_min`.
 
 ## base.lua Helpers
 
-A `base.lua` file is loaded into the Lua VM before your post-processor. Its functions are available as globals — no `require` needed.
+Chipmunk ships a helper library (`base.lua`) compiled into the binary. It is available via `require` — nothing needs to exist on disk:
+
+```lua
+local base = require("base")
+```
 
 ### Current API
 
 ```lua
-Fmt(n, decimals)
+base.Fmt(n, decimals)
 ```
 
 Format a number to the given decimal places. Returns a string.
 
 ```lua
+local Fmt = require("base").Fmt
+
 Fmt(10.5, 3)    -- "10.500"
 Fmt(-0.1, 2)    -- "-0.10"
 ```
@@ -222,6 +228,7 @@ Note: the current Heidenhain PP uses `#lines` as the line counter, which counts 
 Some controllers merge what the IR represents as separate blocks. Heidenhain merges spindle start with the next motion line (`L X... FMAX M3`), and cutter compensation with the move (`L X... RL`).
 
 Approaches:
+
 - **Buffer and emit later**: When you see `spindle_on`, store the M-code and append it to the next motion line.
 - **Return empty string**: The current Heidenhain PP returns `""` for `spindle_on`/`spindle_off` as a placeholder. This works but means the spindle command is silently dropped — to be fixed as the PP matures.
 
@@ -299,14 +306,19 @@ The test fixtures in `tests/fixtures/` are minimal YAML files you can use as inp
 
 ## Discovery
 
-Post-processors are found in two locations, checked in order:
+Post-processors are `.lua` files discovered from two directories, searched in order:
 
-1. `postprocessors/` directory next to the chipmunk binary (built-in)
-2. `~/.config/chipmunk/postprocessors/` (user, Linux/macOS) or `%APPDATA%\chipmunk\postprocessors\` (Windows)
+1. **`postprocessors/`** — relative to the current working directory. This is where built-in post-processors ship (the `postprocessors/` directory in the repo root).
+2. **`<config_dir>/chipmunk/postprocessors/`** — the user config directory, resolved via the [`dirs`](https://docs.rs/dirs) crate (`dirs::config_dir()`):
+   - Linux: `~/.config/chipmunk/postprocessors/`
+   - macOS: `~/Library/Application Support/chipmunk/postprocessors/`
+   - Windows: `C:\Users\<user>\AppData\Roaming\chipmunk\postprocessors\`
 
-The filename minus `.lua` is the ID. `base.lua` is reserved (loaded as helpers, excluded from the PP list). If a user file has the same name as a built-in, the user file wins.
+The first match wins — `find_postprocessor()` returns the first `.lua` file it finds with a matching name. This means a file in `postprocessors/` (CWD) takes priority over the user config directory.
 
-List available post-processors:
+The filename minus `.lua` is the post-processor ID. `base.lua` in the repository is the source for the compiled-in helper library (see [base.lua Helpers](#baselua-helpers)) and is excluded from the PP list.
+
+When listing post-processors (`chipmunk postprocessors`), both directories are scanned, results are merged, sorted alphabetically, and deduplicated.
 
 ```bash
 chipmunk postprocessors

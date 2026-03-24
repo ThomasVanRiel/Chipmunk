@@ -23,7 +23,6 @@ fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
-    tracing::info!("Starting chipmunk");
     match cli.input.as_deref() {
         Some("postprocessors") => {
             let postprocessors: Vec<String> = nc::postprocessors::list_postprocessors();
@@ -82,17 +81,11 @@ fn main() {
                         eprintln!("Error reading post-processor: {}", e);
                         std::process::exit(1);
                     });
-                    let base_lua = std::fs::read_to_string(nc::postprocessors::BASE_LUA_PATH)
+                    let nc_output = nc::bridge::generate_nc(&pp_lua, &blocks, &name, units_str)
                         .unwrap_or_else(|e| {
-                            eprintln!("Error reading base.lua: {}", e);
+                            eprintln!("Error generating NC: {}", e);
                             std::process::exit(1);
                         });
-                    let nc_output =
-                        nc::bridge::generate_nc(&base_lua, &pp_lua, &blocks, &name, units_str)
-                            .unwrap_or_else(|e| {
-                                eprintln!("Error generating NC: {}", e);
-                                std::process::exit(1);
-                            });
 
                     // Output to file or stdout
                     match &cli.output {

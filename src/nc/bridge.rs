@@ -3,8 +3,9 @@ use crate::core::tool::SpindleDirection;
 use super::ir::NCBlock;
 use mlua::prelude::*;
 
+const BASE_LUA: &str = include_str!("../../postprocessors/base.lua");
+
 pub fn generate_nc(
-    base_lua: &str,
     postprocessor_lua: &str,
     blocks: &[NCBlock],
     program_name: &str,
@@ -13,10 +14,14 @@ pub fn generate_nc(
     // Create Lua VM
     let lua = Lua::new();
 
-    // Load base and postprocessor into vm
-    // TODO: require("base") might be better for pp development. Using global functions as is is
-    // also possible, decide later.
-    lua.load(base_lua).set_name("base").exec()?;
+    // Register base.lua as a preloaded module so post-processors can require("base")
+    let base_src = BASE_LUA.to_string();
+    let preload: LuaTable = lua.globals().get::<LuaTable>("package")?.get("preload")?;
+    preload.set(
+        "base",
+        lua.create_function(move |lua, ()| lua.load(&*base_src).eval::<LuaValue>())?,
+    )?;
+
     let pp: LuaTable = lua.load(postprocessor_lua).eval()?;
 
     // Create the context table

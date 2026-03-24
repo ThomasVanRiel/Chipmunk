@@ -1,6 +1,6 @@
 -- postprocessors/heidenhain.lua
--- Base module with helper functions is automatically loaded
--- `local base = require("base")` is not required (nor allowed)
+local base = require("base")
+local Fmt = base.Fmt
 
 -- Define module to return formatted NC code to Chipmunk
 local M = {}
@@ -51,6 +51,7 @@ end
 -- We return nil anyway on unimplemented blocks.
 -- Returning a stack like object that is sent to all future blocks so they can check if they need to postfix commands.
 -- > Q: What about retroactive commands? Do some commands need to edit program history?
+-- TODO: Maybe send the current context to format_block? e.g. previous position to omit unchanged coordinates?
 function M.format_block(block)
 	if block.type == "tool_change" then
 		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed

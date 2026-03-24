@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-pub const BASE_LUA_PATH: &str = "postprocessors/base.lua";
-
 pub fn find_postprocessor(name: &str) -> Option<PathBuf> {
     let search_dirs = postprocessor_dirs();
     for dir in search_dirs {
