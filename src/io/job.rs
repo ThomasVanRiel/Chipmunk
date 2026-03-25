@@ -1,4 +1,5 @@
 use crate::core::units::Units;
+use crate::toolpath::patterns::Pattern;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -20,11 +21,11 @@ pub struct OperationConfig {
     pub tool_name: Option<String>,
     pub tool_diameter: Option<f64>,
     pub spindle_speed: f64,
-    pub points: Vec<[f64; 2]>,
+    pub pattern: Option<Pattern>,
 }
 
 pub fn load_job(path: &str) -> anyhow::Result<JobConfig> {
     let contents = std::fs::read_to_string(path)?;
-    let config: JobConfig = serde_yaml::from_str(&contents)?;
+    let config: JobConfig = serde_yml::from_str(&contents)?;
     Ok(config)
 }

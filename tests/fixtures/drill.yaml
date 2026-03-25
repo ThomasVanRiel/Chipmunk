@@ -9,7 +9,9 @@ operations:
     tool_name: "Centerdrill"
     tool_diameter: 3.0
     spindle_speed: 1200
-    points:
-      - [25.0, 15.0]
-      - [75.0, 15.0]
-      - [75.0, 65.0]
+    pattern:
+      !list
+        points:
+          - [25.0, 15.0]
+          - [75.0, 15.0]
+          - [75.0, 65.0]

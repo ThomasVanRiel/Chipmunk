@@ -1,7 +1,9 @@
+use anyhow::Error;
 use chipmunk::{
     core::toolpath::ToolpathSegment,
     io::job::load_job,
     nc::{self, ir::NCBlock},
+    toolpath::patterns::Pattern,
 };
 use clap::Parser;
 use std::path::Path;
@@ -59,8 +61,14 @@ fn main() {
                         spindle_speed: operation.spindle_speed,
                         spindle_direction: chipmunk::core::tool::SpindleDirection::Cw,
                     };
-                    let segments = operation
-                        .points
+
+                    let pattern = operation.pattern.as_ref().unwrap();
+                    tracing::info!("{:?}", pattern);
+                    let points = match &pattern {
+                        Pattern::List { points } => points,
+                        _ => &vec![[0f64, 0f64]], // Execute at 0,0 if no pattern was provided
+                    };
+                    let segments = points
                         .iter()
                         .map(|[x, y]| ToolpathSegment {
                             move_type: chipmunk::core::toolpath::MoveType::Rapid,
