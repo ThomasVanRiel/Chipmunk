@@ -3,6 +3,8 @@
 ## inbox
 
 * STEP NC support + bidirectional CAD↔CAM data flow. STEP-NC (ISO 14649) describes what to make rather than how to move — controllers optimize toolpaths, results can feed back to CAD. Massive scope expansion. Few controllers support it natively (Siemens SINUMERIK partial). GD&T interpretation alone is a project.
+* Implementing all Heidenhain conversational language features will result in extremely complex postprocessor bindings and IR. Implement a subset of the specification will be sufficient. Not all canned cycles and coordinate transformations are needed. How can we define the scope of the postprocessors?
+* Should we add postprocessor parameters?
 
 ---
 
