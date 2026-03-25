@@ -11,6 +11,7 @@ pub fn generate_nc(
 ) -> anyhow::Result<String> {
     // Create Lua VM
     let lua = Lua::new();
+    let serialize_options = mlua::SerializeOptions::new().serialize_none_to_null(false);
 
     // Register base.lua as a preloaded module so post-processors can require("base")
     let base_src = BASE_LUA.to_string();
@@ -30,7 +31,7 @@ pub fn generate_nc(
     // Convert the blocks to lua table
     let blocks_table: Vec<LuaValue> = blocks
         .iter()
-        .map(|block| lua.to_value(block))
+        .map(|block| lua.to_value_with(block, serialize_options))
         .collect::<LuaResult<Vec<LuaValue>>>()?;
 
     // Call the generate function of the postprocessor to return the NC program
