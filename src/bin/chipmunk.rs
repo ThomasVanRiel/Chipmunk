@@ -48,6 +48,7 @@ fn main() {
                         chipmunk::core::units::Units::Inch => "INCH",
                     };
 
+                    // TODO: Clearance might be defined per operation as an override
                     let clearance = job.clearance;
                     // Operations will be a single operation in this test
                     let operation = job.operations.first().unwrap();

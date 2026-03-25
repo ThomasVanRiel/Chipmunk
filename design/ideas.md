@@ -10,7 +10,6 @@
 * All operations can take positions and patterns which are offsets to WCS. If none are provided, they are exectured at WCS
 * Design principle: User input can be lenient (e.g. color definitions in multiple formats, WCS definition can be color or coordinate in svg). Things that are not explicitely stated are errors. We never warn the user.
 * Patterns: cirles, rectangles, datamatrix, QR, linear.
-* Document IR blocks and possible operations and patterns better
 
 ---
 
