@@ -58,7 +58,7 @@ function M.format_block(block)
 		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed
 	elseif block.type == "comment" then
 		-- TODO: "* <comment>" is also a valid comment block, when to use what comment type?
-		return "; " .. block.comment
+		return "; " .. block.text
 	elseif block.type == "stop" then
 		return "M0"
 	elseif block.type == "spindle_on" then
@@ -71,7 +71,7 @@ function M.format_block(block)
 		-- For now, we stop the spindle with a dummy line
 		return "L M5"
 	elseif block.type == "retract" then
-		return "L " .. M.hh_coord("Z", block.z) .. " FMAX"
+		return "L " .. M.hh_coord("Z", block.height) .. " FMAX"
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
 		return "L Z+0 R0 FMAX M92"
