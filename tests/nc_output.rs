@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use std::fs;
 use std::path::Path;
 
+// LLM generated test (Claude Opus 4.6)
 /// Find all .yaml files in tests/fixtures/ that have a matching expected output
 /// file with the same stem (e.g. drill.yaml + drill.h).
 fn fixture_pairs() -> Vec<(String, String)> {

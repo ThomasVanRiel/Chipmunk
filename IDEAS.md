@@ -60,6 +60,8 @@ Any operation can declare `tolerance` and `tolerance_strategy`. Two input format
 
 `tolerance_strategy`: `wide` (target loose end), `middle` (center of band), `narrow` (target tight end).
 
+> Heidenhain also provides tolerances in the CYCLE208 Bore Milling.
+
 In **CAM mode**: the kernel shifts the target dimension and computes the offset toolpath accordingly. In **controller mode** (G41/G42, RL/RR): the programmed contour is shifted to the tolerance target and the post-processor emits a comment with the tolerance info so the operator knows what was applied. The operator retains full control via wear offsets. No tolerance declared = nominal geometry, no shift — operator manages everything via wear offsets.
 
 **Post-processor capability declarations: cycles and patterns**
