@@ -5,6 +5,7 @@
 * STEP NC support + bidirectional CAD↔CAM data flow. STEP-NC (ISO 14649) describes what to make rather than how to move — controllers optimize toolpaths, results can feed back to CAD. Massive scope expansion. Few controllers support it natively (Siemens SINUMERIK partial). GD&T interpretation alone is a project.
 * Implementing all Heidenhain conversational language features will result in extremely complex postprocessor bindings and IR. Implement a subset of the specification will be sufficient. Not all canned cycles and coordinate transformations are needed. How can we define the scope of the postprocessors?
 * Should we add postprocessor parameters?
+* Move CLI and clap to src/cli/
 
 ---
 
@@ -40,7 +41,7 @@ Toolpath calculations parallelized per operation via rayon. Operations within a 
 Simple pockets (rectangular, circular) can be defined parametrically in YAML instead of requiring SVG/DXF. Preserved through the IR so post-processors can emit native pocket cycles (e.g. Heidenhain `CYCL DEF 251/252`) instead of computed toolpaths. Same principle as drill pattern preservation.
 
 **CLI subcommands**
-Adopt subcommands: `chipmunk run`, `chipmunk postprocessors`, `chipmunk check`, `chipmunk serve`, `chipmunk tools`. Implicit `run` when first arg is a `.yaml`/`.yml` file (shortcut: `chipmunk job.yaml`). `chipmunk postprocessors [name]` can show a specific PP's capabilities (supported cycles, skip strategy).
+Adopt subcommands: `chipmunk compile`, `chipmunk postprocessors`, `chipmunk check`, `chipmunk serve`, `chipmunk tools`. Implicit `compile` when first arg is a `.yaml`/`.yml` file (shortcut: `chipmunk job.yaml`). `chipmunk postprocessors [name]` can show a specific PP's capabilities (supported cycles, skip strategy).
 
 **M0/M1 between operations**
 Per-setup YAML field `stop_between_operations`: `"mandatory"` (M0), `"optional"` (M1), or `"none"` (default). Compiler emits `stop` or `optional_stop` IR block between operations within a setup.

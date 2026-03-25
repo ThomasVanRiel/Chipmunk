@@ -1,4 +1,3 @@
-use anyhow::Error;
 use chipmunk::{
     core::toolpath::ToolpathSegment,
     io::job::load_job,
@@ -51,7 +50,8 @@ fn main() {
                     };
 
                     // TODO: Clearance might be defined per operation as an override
-                    let clearance = job.clearance;
+                    let global_clearance = job.clearance;
+                    let clearance = global_clearance;
                     // Operations will be a single operation in this test
                     let operation = job.operations.first().unwrap();
                     let tool = chipmunk::core::tool::Tool {
