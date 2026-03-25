@@ -7,6 +7,8 @@
 * Add IR block goto clearance? Going to max Z is useful. Clearance moves contain only Z, which allows IR moves (rapid/linear) to always contain ALL used coordinates (Omitting multi axis is fine for now).
 * Absolute vs relative moves? PP should handle this, as heidenhain uses I... while G-code uses G91 as a modal command.
 * Path planning using heidenhain is rather complex. How to send contour to canned cycles?
+* All operations can take positions and patterns which are offsets to WCS. If none are provided, they are exectured at WCS
+* Design principle: User input can be lenient (e.g. color definitions in multiple formats, WCS definition can be color or coordinate in svg). Things that are not explicitely stated are errors. We never warn the user.
 
 ---
 
