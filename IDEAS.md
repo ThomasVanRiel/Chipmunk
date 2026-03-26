@@ -2,10 +2,13 @@
 
 ## inbox
 
-* STEP NC support + bidirectional CAD↔CAM data flow. STEP-NC (ISO 14649) describes what to make rather than how to move — controllers optimize toolpaths, results can feed back to CAD. Massive scope expansion. Few controllers support it natively (Siemens SINUMERIK partial). GD&T interpretation alone is a project.
-* Implementing all Heidenhain conversational language features will result in extremely complex postprocessor bindings and IR. Implement a subset of the specification will be sufficient. Not all canned cycles and coordinate transformations are needed. How can we define the scope of the postprocessors?
-* Should we add postprocessor parameters?
-* Move CLI and clap to src/cli/
+
+---
+
+## Current tasks
+
+**Move CLI and clap to `src/cli/`**
+Separate CLI adapter from the binary entrypoint. Move clap argument parsing and CLI logic into `src/cli/` module, keeping `main.rs` as a thin entrypoint. Aligns with the module dependency rules — `cli/` is a peer adapter alongside `api/`.
 
 ---
 
@@ -50,7 +53,7 @@ Per-setup YAML field `stop_between_operations`: `"mandatory"` (M0), `"optional"`
 Docs should frame Chipmunk as a CAM kernel with a CLI-first interface — not just a CLI tool. The architecture (pure computational library with thin CLI/API adapters) supports multiple frontends: CLI, REST API, future GUI, integrations.
 
 **Positions and patterns on all operations**
-Any operation can take `positions` and/or `patterns` fields (same syntax as drill points: explicit `[x, y]` coordinates, `circle_pattern`, `line_pattern`, `rect_pattern`). The operation executes at each position as an offset from WCS. If none are provided, the operation executes at WCS origin. Patterns are preserved through the IR so post-processors can emit native support (e.g. Heidenhain `PATTERN DEF` + `CYCL CALL PAT`). Post-processors without native pattern support receive pre-expanded operations from Rust.
+Any operation can take `positions` and/or `patterns` fields (same syntax as drill points: explicit `[x, y]` coordinates, `circle_pattern`, `line_pattern`, `rect_pattern`). The operation executes at each position as an offset from WCS. If none are provided, the operation executes at WCS origin. Patterns are preserved through the IR **only for canned cycles** so post-processors can emit native support (e.g. Heidenhain `PATTERN DEF` + `CYCL CALL PAT`, Sinumerik `HOLES1`/`HOLES2`). Milling operations with positions are always pre-expanded by Rust into repeated operations. Post-processors without native pattern support for a given cycle receive pre-expanded individual cycle calls from Rust.
 
 **QR and datamatrix patterns**
 `qr_pattern` and `datamatrix_pattern` are pattern types alongside `circle_pattern`, `line_pattern`, and `rect_pattern`. They generate a grid of positions from a content string and cell size. Same preservation principle: patterns stay in the IR so post-processors with native support can emit native instructions (e.g. Heidenhain data matrix engraving cycles); the compiler expands in Rust for post-processors without support.
@@ -68,10 +71,34 @@ Any operation can declare `tolerance` and `tolerance_strategy`. Two input format
 In **CAM mode**: the kernel shifts the target dimension and computes the offset toolpath accordingly. In **controller mode** (G41/G42, RL/RR): the programmed contour is shifted to the tolerance target and the post-processor emits a comment with the tolerance info so the operator knows what was applied. The operator retains full control via wear offsets. No tolerance declared = nominal geometry, no shift — operator manages everything via wear offsets.
 
 **Post-processor capability declarations: cycles and patterns**
-Post-processors declare supported capabilities in two separate categories: **cycles** (e.g. drilling cycles, pocket cycles) and **patterns** (e.g. circle, line, rect, qr, datamatrix). The compiler checks both when deciding whether to preserve IR constructs for native emission or pre-expand them in Rust.
+Post-processors declare supported capabilities as a `cycles` table in Lua. Each key is a cycle type; the value is a list of supported pattern types for that cycle. An empty list means the cycle is supported but no native patterns. Rust deserializes this as `HashMap<String, Vec<String>>` via mlua.
+
+```lua
+capabilities = {
+  cycles = {
+    drill = { "circle", "line", "rect" },
+    peck_drill = { "circle", "line", "rect" },
+    tap = {},
+  }
+}
+```
+
+Two-level fallback: if a cycle+pattern combo isn't declared, Rust expands the pattern into individual cycle calls. If the cycle itself isn't declared, Rust expands to explicit moves. Patterns are only preserved in the IR when paired with a canned cycle — milling operations with positions are always pre-expanded by Rust.
 
 **Lenient input, strict on missing data**
 The kernel accepts multiple valid representations for the same concept — each must be structurally unambiguous so the kernel pattern-matches on input shape, never guesses. Examples: a coordinate can be an `[x, y, z]` array or a color reference to geometry (structurally distinct); colors can be `"#FF0000"`, `"red"`, or `"rgb(255,0,0)"` (different formats, same value); feeds can be absolute RPM or cutting parameters (different field sets, never mixed). If two input formats could be confused, that's a design bug. Anything not explicitly stated is a hard error — never warn, never infer.
+
+**No post-processor parameters**
+PPs are standalone Lua files. To adapt for a machine variant, duplicate the file and edit. No parameter, inheritance, or patching mechanism — PP files are small enough that a full copy is simpler and more readable for non-developers (machinists, applications engineers). The PP developer uses whatever diff tooling they prefer to compare variants.
+
+**Post-processor scope is bounded by the IR**
+The IR defines the ceiling of what a PP can emit. Capability declarations determine what the PP handles natively vs what Rust pre-expands. Controller-side features (coordinate transformations, touch probe cycles, 5-axis tilted working plane, free contour programming) never enter the IR — they are operator/controller concerns, not CAM output. No attempt to cover any controller's full specification.
+
+**Program structure is PP territory**
+Program start/end framing (Heidenhain BEGIN PGM / END PGM, G-code `%` / `M30`, safety lines, axis clamping) is output formatting, not machining semantics. The IR does not emit program structure — the PP wraps the IR output in whatever the controller expects. Same category as block numbering.
+
+**Typed canned cycle variants in the IR**
+Canned cycles use typed IR variants (DrillCycle, PeckDrillCycle, TapCycle, BoreCycle, etc.) with known parameter fields per type. The compiler validates completeness — missing parameters are a hard error. The PP pattern-matches on the variant. Adding a new cycle type means adding a variant to the IR enum. Generic parameter bags are not used — the set of cycle types is finite and known.
 
 **Modal state and incremental moves in the IR**
 The IR supports modal controller state (coordinate mode, feed mode, working plane, etc.) via operation-level settings blocks emitted at the start of each operation. Individual move blocks can override the operation default (e.g., a single incremental retract within an otherwise absolute operation). The post-processor tracks current modal state and emits switches (G90/G91, `I...` prefix, G94/G95, etc.) only when state changes. This keeps the IR declarative while preserving semantic intent — an incremental retract ("up 2mm from here") is distinct from an absolute move to a Z height.
@@ -88,3 +115,6 @@ Removed — piping stdout to a transfer tool is sufficient and more flexible.
 
 **Heidenhain contour-based canned cycles**
 How to pass contour geometry to Heidenhain cycles like `CYCL DEF 25x` (contour pocket, contour milling). These expect contours defined as labeled subprograms (`LBL`), structurally different from G-code. Deferred until contour milling operations are implemented.
+
+**STEP-NC support + bidirectional CAD↔CAM data flow**
+STEP-NC (ISO 14649) describes what to make rather than how to move — controllers optimize toolpaths, results can feed back to CAD. Out of scope — few controllers support it natively (Siemens SINUMERIK partial), and the interpretation layer (GD&T alone) exceeds current project scope.
