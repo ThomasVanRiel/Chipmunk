@@ -1,0 +1,17 @@
+name: CYCLE200
+postprocessor: heidenhain
+clearance: 50.0
+
+operations:
+  - type: drill
+    strategy: general
+    tool_number: 1
+    spindle_speed: 1200
+    feed: 150
+    depth: 20
+    setup_clearance: 2
+    plunging_depth: 5
+    pattern:
+      !list
+        points:
+          - [30.0, 20.0]

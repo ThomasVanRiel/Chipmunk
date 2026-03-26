@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub enum DrillStrategy {
     Manual,
+    General,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -33,4 +33,17 @@ pub enum NCBlock {
         feed: f64,
     },
     SpindleOff,
+
+    // Canned Cycles
+    CycleDrill {
+        depth: f64,
+        surface_position: f64,
+        plunge_depth: f64,
+        feed: f64,
+        dwell_top: f64,
+        dwell_bottom: f64,
+        clearance: f64,
+        second_clearance: f64,
+        tip_trough: bool,
+    },
 }
