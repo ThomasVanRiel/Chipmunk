@@ -2,6 +2,7 @@
 
 ## inbox
 
+* Text based interface is straightforward to program using LLM. Maybe we can write a skill or MD to quickly teach LLM the available configurations. An operator would be able to describe what they need, the LLM converts the instructions into a job and discusses with the user to double check. The stochastic LLM behaviour is hardened into deterministic code generation by chipmunk.
 
 ---
 
