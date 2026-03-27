@@ -11,7 +11,7 @@ M.file_extension = ".h"
 
 -- Indicate what canned cycles are supported by this postprocessor
 -- Omit or return empty table if none are supported
-M.supported_cycles = {}
+M.capabilities = { cycles = { drilling = {} } }
 
 -- This function is called by Chipmunk with the list of IR blocks
 -- blocks: array of block tables (see IR documentation)

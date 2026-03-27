@@ -1,7 +1,33 @@
 use super::ir::NCBlock;
+use crate::nc::postprocessors::PostprocessorCapabilities;
 use mlua::prelude::*;
+use std::collections::HashMap;
 
 const BASE_LUA: &str = include_str!("../../postprocessors/base.lua");
+
+// Parse lua to get postprocessor cycle/pattern support
+pub fn get_capabilities(postprocessor_lua: &str) -> anyhow::Result<PostprocessorCapabilities> {
+    let lua = Lua::new();
+    //
+    // Register base.lua as a preloaded module so post-processors can require("base")
+    let base_src = BASE_LUA.to_string();
+    let preload: LuaTable = lua.globals().get::<LuaTable>("package")?.get("preload")?;
+    preload.set(
+        "base",
+        lua.create_function(move |lua, ()| lua.load(&*base_src).eval::<LuaValue>())?,
+    )?;
+
+    let pp: LuaTable = lua.load(postprocessor_lua).eval()?;
+    let capabilities: PostprocessorCapabilities =
+        match pp.get::<Option<LuaValue>>("capabilities")? {
+            Some(v) => lua.from_value(v)?,
+            None => PostprocessorCapabilities::default(),
+        };
+
+    tracing::info!("Postprocessor capabilities: {:#?}", capabilities);
+
+    Ok(capabilities)
+}
 
 pub fn generate_nc(
     postprocessor_lua: &str,
