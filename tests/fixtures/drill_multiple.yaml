@@ -1,0 +1,24 @@
+name: Multi Drill Test
+postprocessor: heidenhain
+clearance: 5.0
+
+operations:
+  - name: Manual Drilling 1
+    type: drilling
+    strategy: manual
+    tool_number: 1
+    tool_name: "Drill 1"
+    tool_diameter: 3.0
+    spindle_speed: 800
+    points:
+      - [25.0, 15.0]
+
+  - name: Manual Drilling 2
+    type: drilling
+    strategy: manual
+    tool_number: 2
+    tool_name: "Drill 2"
+    tool_diameter: 3.0
+    spindle_speed: 1200
+    points:
+      - [75.0, 15.0]

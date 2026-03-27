@@ -1,6 +1,8 @@
 use super::ir::NCBlock;
+use crate::core::operation::{DrillStrategy, Operation, OperationLocations};
 use crate::core::tool::Tool;
-use crate::core::toolpath::ToolpathSegment;
+use crate::core::toolpath::{MoveType, ToolpathSegment};
+use anyhow::anyhow;
 
 pub fn compile_manual_drill(
     tool: &Tool,
@@ -36,4 +38,37 @@ pub fn compile_manual_drill(
     // SpindleOff optional, program end automatically stops spindle.
     // blocks.push(NCBlock::SpindleOff);
     blocks
+}
+
+pub fn process_drilling(
+    operation: &Operation,
+    strategy: &DrillStrategy,
+) -> anyhow::Result<Vec<NCBlock>> {
+    // TODO: We ignore patterns for now. A pattern copies the tool path and executes it with a
+    // different offset by transforming the coordinates.
+    match strategy {
+        DrillStrategy::Manual => {
+            let segments: Vec<ToolpathSegment> = match operation.locations {
+                OperationLocations::Points { points } => Ok(points
+                    .iter()
+                    .map(|[x, y]| ToolpathSegment {
+                        move_type: MoveType::Rapid,
+                        x: *x,
+                        y: *y,
+                        z: operation.global_clearance,
+                    })
+                    .collect::<Vec<_>>()),
+                OperationLocations::Pattern { pattern } => Err(anyhow!(
+                    "Drilling pattern {:?} not implemented yet!",
+                    pattern
+                )),
+            }?;
+            Ok(compile_manual_drill(
+                &operation.tool,
+                operation.global_clearance,
+                &segments,
+            ))
+        }
+        DrillStrategy::General => Err(anyhow!("General drilling not implemented yet!")),
+    }
 }

@@ -1,12 +1,5 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-
-#[derive(Debug, Default, serde::Deserialize)]
-pub struct PostprocessorCapabilities {
-    #[serde(default)]
-    cycles: HashMap<String, Vec<String>>,
-}
 
 pub fn find_postprocessor(name: &str) -> Option<PathBuf> {
     let search_dirs = postprocessor_dirs();

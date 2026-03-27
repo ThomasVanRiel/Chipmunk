@@ -1,7 +1,8 @@
-use crate::core::operation::{self, OperationLocations, OperationType, process_drilling};
+use crate::core::operation::{self, OperationLocations, OperationType};
 use crate::core::tool::Tool;
 use crate::core::units::Units;
 use crate::io::job::operation::DrillStrategy;
+use crate::nc::compiler::process_drilling;
 use crate::nc::ir::NCBlock;
 use crate::nc::{self, bridge};
 use anyhow::anyhow;
@@ -103,7 +104,7 @@ pub fn run_job(job: &JobConfig) -> anyhow::Result<String> {
                     // TODO: Get default values from the tool registery if tool id is given.
                     // Extract tool processing as a function, which can handle tool libraries.
                     let tool = Tool {
-                        tool_number: 1,
+                        tool_number: common.tool_number.unwrap_or(1),
                         name: common.tool_name.clone().unwrap_or_default(),
                         diameter: common.tool_diameter.unwrap_or(0.0),
                         spindle_direction: crate::core::tool::SpindleDirection::Cw,
@@ -126,5 +127,11 @@ pub fn run_job(job: &JobConfig) -> anyhow::Result<String> {
         .into_iter()
         .flatten()
         .collect();
-    nc::bridge::generate_nc(&pp_lua, &blocks, "test", "mm")
+    // TODO: Update program name and units
+    nc::bridge::generate_nc(
+        &pp_lua,
+        &blocks,
+        job.name.clone().unwrap_or("unnamed".to_string()),
+        format!("{}", job.units),
+    )
 }

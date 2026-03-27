@@ -1,5 +1,5 @@
 use super::ir::NCBlock;
-use crate::nc::postprocessors::PostprocessorCapabilities;
+use crate::core::postprocessors::PostprocessorCapabilities;
 use mlua::prelude::*;
 
 const BASE_LUA: &str = include_str!("../../postprocessors/base.lua");
@@ -31,8 +31,8 @@ pub fn get_capabilities(postprocessor_lua: &str) -> anyhow::Result<Postprocessor
 pub fn generate_nc(
     postprocessor_lua: &str,
     blocks: &[NCBlock],
-    program_name: &str,
-    units: &str,
+    program_name: String,
+    units: String,
 ) -> anyhow::Result<String> {
     // Create Lua VM
     let lua = Lua::new();
@@ -51,6 +51,7 @@ pub fn generate_nc(
     // Create the context table
     let context = lua.create_table()?;
     context.set("name", program_name)?;
+    tracing::info!("Units: {:?}", units);
     context.set("units", units)?;
 
     // Convert the blocks to lua table
