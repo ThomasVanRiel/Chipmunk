@@ -1,11 +1,8 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Pattern {
-    List {
-        points: Vec<[f64; 2]>,
-    },
     Circular {
         cc: [f64; 2],
         // TODO: We need to check that only one of diameter/radius is specified!

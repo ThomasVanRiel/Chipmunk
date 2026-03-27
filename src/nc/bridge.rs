@@ -1,7 +1,6 @@
 use super::ir::NCBlock;
 use crate::nc::postprocessors::PostprocessorCapabilities;
 use mlua::prelude::*;
-use std::collections::HashMap;
 
 const BASE_LUA: &str = include_str!("../../postprocessors/base.lua");
 

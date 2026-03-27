@@ -3,8 +3,6 @@ use crate::core::tool::Tool;
 use crate::core::toolpath::ToolpathSegment;
 
 pub fn compile_manual_drill(
-    _program_name: &str,
-    _units: &str,
     tool: &Tool,
     clearance_z: f64,
     segments: &[ToolpathSegment],

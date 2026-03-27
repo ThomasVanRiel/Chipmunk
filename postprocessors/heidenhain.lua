@@ -26,7 +26,7 @@ function M.generate(blocks, context)
 	local lines = {}
 
 	-- Preamble
-	lines[#lines + 1] = "0 BEGIN PGM " .. context.name .. " " .. context.units
+	lines[#lines + 1] = "0 BEGIN PGM " .. context.name .. " " .. string.upper(context.units)
 	-- block form? Check context if stock is provided.
 
 	-- NC Blocks
@@ -43,7 +43,7 @@ function M.generate(blocks, context)
 	-- Postamble
 	-- TODO: Add M30?
 	lines[#lines + 1] = #lines .. " M30"
-	lines[#lines + 1] = #lines .. " END PGM " .. context.name .. " " .. context.units
+	lines[#lines + 1] = #lines .. " END PGM " .. context.name .. " " .. string.upper(context.units)
 
 	return table.concat(lines, "\n")
 end

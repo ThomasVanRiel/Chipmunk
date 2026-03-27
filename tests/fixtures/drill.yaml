@@ -3,15 +3,14 @@ postprocessor: heidenhain
 clearance: 5.0
 
 operations:
-  - type: drill
+  - name: Manual Drilling test
+    type: drilling
     strategy: manual
     tool_number: 1
     tool_name: "Centerdrill"
     tool_diameter: 3.0
     spindle_speed: 1200
-    pattern:
-      !list
-        points:
-          - [25.0, 15.0]
-          - [75.0, 15.0]
-          - [75.0, 65.0]
+    points:
+      - [25.0, 15.0]
+      - [75.0, 15.0]
+      - [75.0, 65.0]
