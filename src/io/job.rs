@@ -59,6 +59,8 @@ impl OperationConfig {
         Ok(crate::operations::Operation {
             common: OperationCommon {
                 name: common_cfg.name.unwrap_or_default(),
+                // TODO: implement tool loading from config or library using
+                // `common_cfg.into_tool()?`
                 tool: Tool::default(),
                 clearance,
                 capabilities,

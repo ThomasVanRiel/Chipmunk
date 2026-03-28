@@ -33,14 +33,16 @@ impl OperationType for Quill {
         segments: &[ToolpathSegment],
     ) -> Result<Vec<NCBlock>> {
         let mut blocks: Vec<NCBlock> = vec![
-            NCBlock::ToolChange {
-                tool_number: Some(common.tool.tool_number),
-                spindle_speed: common.tool.spindle_speed,
-            },
+            // ! No toolchange when manual drilling as it might change the coordinate
+            // NCBlock::ToolChange {
+            //     tool_number: Some(common.tool.tool_number),
+            //     spindle_speed: common.tool.spindle_speed,
+            // },
+            NCBlock::OperationStart { text: None },
+            NCBlock::Stop,
             NCBlock::Comment {
                 text: String::from("ENABLE SINGLE BLOCK MODE FOR QUILL DRILLING"),
             },
-            NCBlock::Stop,
             NCBlock::SpindleOn {
                 direction: common.tool.spindle_direction,
             },
@@ -58,6 +60,7 @@ impl OperationType for Quill {
         blocks.push(NCBlock::Retract {
             height: common.clearance,
         });
+        blocks.push(NCBlock::OperationEnd { text: None });
         // SpindleOff optional, program end automatically stops spindle.
         // blocks.push(NCBlock::SpindleOff);
         Ok(blocks)

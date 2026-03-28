@@ -54,7 +54,11 @@ end
 -- > Q: What about retroactive commands? Do some commands need to edit program history?
 -- TODO: Maybe send the current context to format_block? e.g. previous position to omit unchanged coordinates?
 function M.format_block(block)
-	if block.type == "tool_change" then
+	if block.type == "operation_start" then
+		return ""
+	elseif block.type == "operation_end" then
+		return ""
+	elseif block.type == "tool_change" then
 		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed
 	elseif block.type == "comment" then
 		-- TODO: "* <comment>" is also a valid comment block, when to use what comment type?
