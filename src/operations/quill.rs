@@ -31,6 +31,7 @@ impl OperationType for Quill {
             }
         }
     }
+
     fn compile(
         &self,
         common: &OperationCommon,

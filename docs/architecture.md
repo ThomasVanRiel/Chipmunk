@@ -8,14 +8,12 @@ This is a high-level overview for contributors. Detailed design lives in `design
 YAML job file
     │
     ▼
-io/job.rs           Parse YAML into JobConfig
+io/job.rs           Parse YAML → JobConfig → OperationConfig.into_operation()
     │
     ▼
-core/               Tool, ToolpathSegment, NCBlock IR (data types)
-    │
-    ▼
-operations/         Per-type generate() + compile()
-    │                (e.g. drill.rs generates toolpath, then compiles to NCBlocks)
+operations/         operation.generate() → ToolpathSegments
+    │               operation.compile(segments) → NCBlocks
+    │               (each operation type owns both steps)
     ▼
 nc/bridge.rs        Fresh Lua VM per call
     │                Load base.lua + post-processor
@@ -40,17 +38,16 @@ src/
 ├── bin/chipmunk.rs     CLI entry point (clap)
 ├── lib.rs              Crate root
 ├── cli/                CLI adapter (calls io/, operations/, nc/)
-├── core/               Data types: Tool, ToolpathSegment, NCBlock IR, Units
+├── core/               Data types: Tool, ToolpathSegment, Units, Locations
 │                       No framework deps — pure Rust + serde
 ├── io/                 YAML parsing (job.rs)
-│                       Builds Operation structs, dispatches to operations/
+│                       Deserializes OperationConfig, converts to Operation
 ├── operations/         Per-operation-type behavior
-│   ├── mod.rs          OperationKind enum, trait defs, dispatch
-│   ├── drill.rs        generate() + compile() for drilling
-│   ├── patterns.rs     Shared hole patterns (bolt circle, grid, etc.)
-│   └── ...             Future: pocket.rs, profile.rs, face.rs, tap.rs
+│   ├── mod.rs          Operation, OperationCommon, OperationKind, OperationType trait, dispatch
+│   ├── quill.rs        Manual quill drilling: generate() + compile()
+│   └── ...             Future: drill.rs (canned cycles), pocket.rs, profile.rs, etc.
 └── nc/
-    ├── ir.rs           NCBlock enum (the IR) — lives in core/ conceptually
+    ├── ir.rs           NCBlock enum (the IR)
     ├── bridge.rs       Rust ↔ Lua bridge (mlua)
     └── postprocessors.rs  PP discovery (built-in + user dirs)
 ```
@@ -74,59 +71,70 @@ No circular dependencies. `core/`, `operations/`, `nc/`, `io/` have zero framewo
 
 ## Operation Architecture
 
-Operations use a shared struct for common fields and an enum for type-specific parameters:
+Operations use a shared struct (`OperationCommon`) for fields every operation needs, an enum (`OperationKind`) for type dispatch, and a trait (`OperationType`) for per-type behavior:
 
 ```rust
-pub struct Operation {
-    pub name: String,
-    pub tool: Tool,
-    pub clearance: f64,
-    pub skip_level: Option<u8>,
+pub struct Operation<'a> {
+    pub common: OperationCommon<'a>,
     pub kind: OperationKind,
 }
 
+pub struct OperationCommon<'a> {
+    pub name: String,
+    pub tool: Tool,
+    pub capabilities: &'a PostprocessorCapabilities,
+    pub clearance: f64,
+}
+
 pub enum OperationKind {
-    Drill { strategy: DrillStrategy, locations: Locations, depth: f64 },
-    Pocket { geometry: GeometryRef, stepover: f64, stepdown: f64 },
-    // ...
+    Quill(Quill),
+    // Future: Peck(Peck), Pocket(Pocket), Profile(Profile), ...
+}
+
+pub trait OperationType {
+    fn generate(&self, common: &OperationCommon) -> Result<Vec<ToolpathSegment>>;
+    fn compile(&self, common: &OperationCommon, segments: &[ToolpathSegment]) -> Result<Vec<NCBlock>>;
 }
 ```
 
-`Operation` methods match on `kind` and delegate to per-type modules. No traits needed — the operation set is closed at compile time, so the match is the dispatch:
+Each operation type is a self-contained struct that implements `OperationType`. `generate()` produces toolpath segments from the operation's parameters; `compile()` turns those segments into NCBlocks. Both receive `&OperationCommon` for shared fields (tool, clearance, etc.).
+
+### Dispatch
+
+A single private method on `Operation` bridges the enum to the trait:
 
 ```rust
 impl Operation {
-    pub fn generate(&self) -> Vec<ToolpathSegment> {
+    fn kind_impl(&self) -> &dyn OperationType {
         match &self.kind {
-            OperationKind::Drill { .. } => drill::generate(self),
-            OperationKind::Pocket { .. } => pocket::generate(self),
-            // ...
+            OperationKind::Quill(q) => q,
         }
     }
 
-    pub fn compile(&self, segments: &[ToolpathSegment]) -> Vec<NCBlock> {
-        match &self.kind {
-            OperationKind::Drill { .. } => drill::compile(self, segments),
-            OperationKind::Pocket { .. } => pocket::compile(self, segments),
-            // ...
-        }
+    pub fn generate(&self) -> Result<Vec<ToolpathSegment>> {
+        self.kind_impl().generate(&self.common)
+    }
+
+    pub fn compile(&self, segments: &[ToolpathSegment]) -> Result<Vec<NCBlock>> {
+        self.kind_impl().compile(&self.common, segments)
     }
 }
 ```
 
-Per-type functions receive `&Operation` and extract what they need from `kind` internally. Adding a new operation type requires:
+Callers only see `operation.generate()` and `operation.compile()` — the trait and enum are internal. The enum match exists once in `kind_impl`; the compiler forces a new arm when a variant is added.
 
-1. Add the variant to `OperationKind`.
-2. Create the per-type module with `generate()` and `compile()`.
-3. Add the match arm in each `Operation` method — the compiler enforces this.
+### Adding a new operation type
+
+1. Create a struct with the type-specific fields (e.g. `Pocket { geometry, stepover, stepdown }`).
+2. Implement `OperationType` — write `generate()` and `compile()`.
+3. Add the variant to `OperationKind` — the compiler forces a match arm in `kind_impl`.
+4. Add the serde variant to `OperationConfig` in `io/job.rs`.
+
+### Code duplication is intentional
+
+Each operation's `generate()` and `compile()` are self-contained. If two operations share similar logic (e.g. multiple drilling strategies building NC blocks with the same envelope structure), shared helpers can be extracted within the drilling family — but operations should not share behavior through abstraction layers. Repeated code across operation types is acceptable and preferred over premature generalization. Each operation module should be readable on its own.
 
 See [discussion-operation-type-modeling.md](discussion-operation-type-modeling.md) for the full analysis behind this decision.
-
-## Envelope/Body Split
-
-The NC compiler separates the **envelope** (tool change, spindle on, clearance rapid, spindle off) from the **body** (operation-specific blocks). The `compile()` trait method for each operation type produces the body; the envelope wrapping is shared logic.
-
-This means post-processors don't need to worry about whether tool changes or spindle commands are in the right place — the envelope handles that. The PP just formats whatever blocks it receives.
 
 ## Post-Processor Execution
 

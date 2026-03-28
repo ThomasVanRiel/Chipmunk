@@ -16,6 +16,7 @@ Quick reference of all design decisions made during planning sessions. For full 
 | SVG stroke color as operation selector | Each stroke color in the SVG maps to one operation in the YAML. Laser cutters use the same convention (color = cut/engrave/mark layer), so hobbyist users already understand the workflow without explanation. Inkscape is the natural authoring tool. | `design/docs/00-overview.md` |
 | Project scope | 2.5D only (SVG/DXF input, top-down view). 3D projects (STEP/STL, Three.js viewport) deferred to backlog. | `design/tasks/backlog.md` |
 | Implementation order | CLI first. Phase 1=scaffolding+import, Phase 2=manual drill, Phase 3=auto drill cycles, Phase 4=2.5D milling. Frontend and 3D are backlog. | `design/docs/07-implementation-phases.md` |
+| Operation type modeling | Shared `OperationCommon` struct (tool, clearance, name, capabilities) + `OperationKind` enum + `OperationType` trait. Enum for serde and exhaustive wiring (single match in `kind_impl`). Trait for encapsulated per-type `generate()` and `compile()`. Each operation is self-contained; code duplication across types is preferred over shared abstractions. Drilling-family helpers are fine. | `docs/architecture.md` |
 | Shape persistence | Separate `.brep` file per part alongside `.camproj` JSON | `design/discussions/brep-geometry.md` #7 |
 
 ## Data Model

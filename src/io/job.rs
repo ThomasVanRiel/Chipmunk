@@ -5,7 +5,7 @@ use crate::core::units::Units;
 use crate::nc::ir::NCBlock;
 use crate::nc::{self, bridge};
 use crate::operations::quill::Quill;
-use crate::operations::{OperationCommon, OperationKind};
+use crate::operations::{OperationCommon, OperationVariant};
 use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::path::Path;
@@ -53,7 +53,7 @@ impl OperationConfig {
     ) -> Result<crate::operations::Operation<'a>> {
         let (common_cfg, kind) = match self {
             OperationConfig::Quill { common, locations } => {
-                (common, OperationKind::Quill(Quill { locations }))
+                (common, OperationVariant::Quill(Quill { locations }))
             }
         };
         Ok(crate::operations::Operation {

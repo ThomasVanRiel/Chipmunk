@@ -8,7 +8,7 @@ use quill::Quill;
 
 pub struct Operation<'a> {
     pub common: OperationCommon<'a>,
-    pub kind: OperationKind,
+    pub kind: OperationVariant,
 }
 
 pub struct OperationCommon<'a> {
@@ -18,7 +18,7 @@ pub struct OperationCommon<'a> {
     pub clearance: f64,
 }
 
-pub enum OperationKind {
+pub enum OperationVariant {
     Quill(Quill),
 }
 
@@ -34,7 +34,7 @@ pub trait OperationType {
 impl<'a> Operation<'a> {
     fn kind_impl(&self) -> &dyn OperationType {
         match &self.kind {
-            OperationKind::Quill(q) => q,
+            OperationVariant::Quill(q) => q,
         }
     }
 
