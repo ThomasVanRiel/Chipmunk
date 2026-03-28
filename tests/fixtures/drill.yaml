@@ -4,8 +4,7 @@ clearance: 5.0
 
 operations:
   - name: Manual Drilling test
-    type: drilling
-    strategy: manual
+    type: quill
     tool_number: 1
     tool_name: "Centerdrill"
     tool_diameter: 3.0

@@ -1,3 +1,4 @@
+use crate::toolpath::patterns::Pattern;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -15,4 +16,11 @@ pub struct ToolpathSegment {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Locations {
+    Points { points: Vec<[f64; 2]> },
+    Pattern { pattern: Pattern },
 }

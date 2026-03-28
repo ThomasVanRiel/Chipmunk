@@ -15,3 +15,15 @@ pub struct Tool {
     pub spindle_speed: f64,
     pub spindle_direction: SpindleDirection,
 }
+
+impl Default for Tool {
+    fn default() -> Tool {
+        Tool {
+            tool_number: 1,
+            name: "Unnamed Tool".to_string(),
+            diameter: 0.0,
+            spindle_speed: 400.0,
+            spindle_direction: SpindleDirection::Cw,
+        }
+    }
+}

@@ -30,7 +30,7 @@ fn main() {
             tracing::info!("Processing job file: {}", path);
             match load_job(path) {
                 Ok(job) => {
-                    let nc_code: String = match run_job(&job) {
+                    let nc_code: String = match run_job(job) {
                         Ok(nc) => nc,
                         Err(e) => {
                             tracing::error!("{}", e);

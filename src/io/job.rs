@@ -1,11 +1,12 @@
-use crate::core::operation::{self, OperationLocations, OperationType};
+use crate::core::postprocessors::PostprocessorCapabilities;
 use crate::core::tool::Tool;
+use crate::core::toolpath::Locations;
 use crate::core::units::Units;
-use crate::io::job::operation::DrillStrategy;
-use crate::nc::compiler::process_drilling;
 use crate::nc::ir::NCBlock;
 use crate::nc::{self, bridge};
-use anyhow::anyhow;
+use crate::operations::quill::Quill;
+use crate::operations::{OperationCommon, OperationKind};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -31,18 +32,40 @@ pub struct CommonOperationConfig {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OperationConfig {
-    Drilling {
+    Quill {
         #[serde(flatten)]
         common: CommonOperationConfig,
-        strategy: DrillStrategy,
         #[serde(flatten)]
-        locations: OperationLocations,
+        locations: Locations,
     },
-    Milling {
-        #[serde(flatten)]
-        common: CommonOperationConfig,
-        strategy: String,
-    },
+    // Milling {
+    //     #[serde(flatten)]
+    //     common: CommonOperationConfig,
+    //     strategy: String,
+    // },
+}
+
+impl OperationConfig {
+    pub fn into_operation<'a>(
+        self,
+        clearance: f64,
+        capabilities: &'a PostprocessorCapabilities,
+    ) -> Result<crate::operations::Operation<'a>> {
+        let (common_cfg, kind) = match self {
+            OperationConfig::Quill { common, locations } => {
+                (common, OperationKind::Quill(Quill { locations }))
+            }
+        };
+        Ok(crate::operations::Operation {
+            common: OperationCommon {
+                name: common_cfg.name.unwrap_or_default(),
+                tool: Tool::default(),
+                clearance,
+                capabilities,
+            },
+            kind,
+        })
+    }
 }
 
 pub fn load_job(path: &str) -> anyhow::Result<JobConfig> {
@@ -64,7 +87,7 @@ pub fn load_job(path: &str) -> anyhow::Result<JobConfig> {
     Ok(config)
 }
 
-pub fn run_job(job: &JobConfig) -> anyhow::Result<String> {
+pub fn run_job(job: JobConfig) -> anyhow::Result<String> {
     // Check if the postprocessor exists
     let pp_path = nc::postprocessors::find_postprocessor(&job.postprocessor)
         .ok_or(anyhow!("Postprocessor {} not found!", &job.postprocessor))?;
@@ -78,8 +101,6 @@ pub fn run_job(job: &JobConfig) -> anyhow::Result<String> {
     // Get PP capabilities
     let capabilities = &bridge::get_capabilities(&pp_lua)?;
 
-    let global_clearance = job.clearance;
-
     // Verify at least one operation is defined
     if job.operations.is_empty() {
         return Err(anyhow!("No operations defined"));
@@ -87,41 +108,11 @@ pub fn run_job(job: &JobConfig) -> anyhow::Result<String> {
     // Iterate over all operations
     let blocks: Vec<NCBlock> = job
         .operations
-        .iter() // TODO: Implement parallelization here using `par_iter` from rayon?
-        .map(|operation| -> anyhow::Result<Vec<NCBlock>> {
-            match operation {
-                OperationConfig::Drilling {
-                    common,
-                    strategy,
-                    locations,
-                } => {
-                    tracing::info!("Processing drilling operation.");
-                    let name = common
-                        .name
-                        .clone()
-                        .unwrap_or("Unnamed Drilling Operation".to_string());
-
-                    // TODO: Get default values from the tool registery if tool id is given.
-                    // Extract tool processing as a function, which can handle tool libraries.
-                    let tool = Tool {
-                        tool_number: common.tool_number.unwrap_or(1),
-                        name: common.tool_name.clone().unwrap_or_default(),
-                        diameter: common.tool_diameter.unwrap_or(0.0),
-                        spindle_direction: crate::core::tool::SpindleDirection::Cw,
-                        spindle_speed: common.spindle_speed.unwrap_or(800.0),
-                    };
-                    let op = operation::Operation {
-                        global_clearance,
-                        name,
-                        operation_type: OperationType::Drilling,
-                        tool,
-                        capabilities,
-                        locations,
-                    };
-                    process_drilling(&op, strategy)
-                }
-                op => Err(anyhow!("Operation {:?} not implemented yet", op)),
-            }
+        .into_iter() // TODO: Implement parallelization here using `par_iter` from rayon?
+        .map(|config| -> anyhow::Result<Vec<NCBlock>> {
+            let op = config.into_operation(job.clearance, capabilities)?;
+            let segments = op.generate()?;
+            op.compile(&segments)
         })
         .collect::<anyhow::Result<Vec<Vec<NCBlock>>>>()?
         .into_iter()
