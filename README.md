@@ -134,7 +134,7 @@ A browser frontend (geometry selection, toolpath preview) is planned but deferre
 
 **No inference.** If a required parameter is missing or a tool ID cannot be resolved, Chipmunk exits with a hard error. No silent defaults, no guessing. Fix the input.
 
-**Post-processors are Lua scripts.** Small, readable, and easy to extend. The toolpath logic and the NC formatting are completely separate — adding support for a new controller means writing a Lua file, not modifying the core. Heidenhain TNC is the primary built-in; a Haas example is included as a starting point for other controllers.
+**Post-processors are Lua scripts.** Small, readable, and easy to extend. The toolpath logic and the NC formatting are completely separate — adding support for a new controller means writing a Lua file, not modifying the core.
 
 **CLI first.** The tool works entirely from the command line — pass a YAML job file directly to the binary. A REST API exists as a peer interface for scripting and a future browser UI, but you never need it.
 
