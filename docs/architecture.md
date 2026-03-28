@@ -11,14 +11,11 @@ YAML job file
 io/job.rs           Parse YAML into JobConfig
     │
     ▼
-core/               Tool, Operation, ToolpathSegment (data types)
+core/               Tool, ToolpathSegment, NCBlock IR (data types)
     │
     ▼
-toolpath/           Generate move sequences from operations
-    │                (e.g. drill.rs produces rapids to each XY point)
-    ▼
-nc/compiler.rs      Wrap toolpath in envelope (tool change, spindle, clearance)
-    │                → Vec<NCBlock> (intermediate representation)
+operations/         Per-type generate() + compile()
+    │                (e.g. drill.rs generates toolpath, then compiles to NCBlocks)
     ▼
 nc/bridge.rs        Fresh Lua VM per call
     │                Load base.lua + post-processor
@@ -42,40 +39,94 @@ Toolpath generators never know about G-code. Post-processors never know about ma
 src/
 ├── bin/chipmunk.rs     CLI entry point (clap)
 ├── lib.rs              Crate root
-├── cli/                CLI adapter (calls core, toolpath, nc)
-├── core/               Data types: Tool, Operation, Toolpath, Units
-│                       No framework deps — pure Rust
+├── cli/                CLI adapter (calls io/, operations/, nc/)
+├── core/               Data types: Tool, ToolpathSegment, NCBlock IR, Units
+│                       No framework deps — pure Rust + serde
 ├── io/                 YAML parsing (job.rs)
-├── toolpath/           Toolpath generation (drill.rs, future: profile, pocket)
-│                       Depends on core/ only
+│                       Builds Operation structs, dispatches to operations/
+├── operations/         Per-operation-type behavior
+│   ├── mod.rs          OperationKind enum, trait defs, dispatch
+│   ├── drill.rs        generate() + compile() for drilling
+│   ├── patterns.rs     Shared hole patterns (bolt circle, grid, etc.)
+│   └── ...             Future: pocket.rs, profile.rs, face.rs, tap.rs
 └── nc/
-    ├── ir.rs           NCBlock enum (the IR)
-    ├── compiler.rs     Toolpath → NCBlock conversion
+    ├── ir.rs           NCBlock enum (the IR) — lives in core/ conceptually
     ├── bridge.rs       Rust ↔ Lua bridge (mlua)
     └── postprocessors.rs  PP discovery (built-in + user dirs)
-
-postprocessors/
-├── base.lua            Shared helpers (loaded as globals)
-└── heidenhain.lua      Built-in Heidenhain PP
 ```
 
 ### Dependency Rules
 
 ```
-cli/        → core/, toolpath/, nc/, io/
-core/       → (nothing — only std, serde, nalgebra)
-toolpath/   → core/
-nc/         → core/
-io/         → core/
+cli/          → io/, operations/, nc/
+io/           → core/, operations/
+operations/   → core/
+nc/           → core/
+core/         → (nothing — only std, serde, nalgebra)
 ```
 
-No circular dependencies. `core/`, `toolpath/`, `nc/`, `io/` have zero framework dependencies — no clap, no axum. They are independently testable.
+No circular dependencies. `core/`, `operations/`, `nc/`, `io/` have zero framework dependencies — no clap, no axum. They are independently testable.
+
+**Key constraints:**
+- `operations/` depends only on `core/` — it reads data types and produces data types. It never touches IO, Lua, or the CLI.
+- `nc/` depends only on `core/` — it takes NCBlocks and formats them via Lua. It never knows about operation types.
+- `io/` is the integration layer — it parses YAML, builds `Operation` structs, calls `operations/` to generate and compile, then hands NCBlocks to `nc/` for post-processing.
+
+## Operation Architecture
+
+Operations use a shared struct for common fields and an enum for type-specific parameters:
+
+```rust
+pub struct Operation {
+    pub name: String,
+    pub tool: Tool,
+    pub clearance: f64,
+    pub skip_level: Option<u8>,
+    pub kind: OperationKind,
+}
+
+pub enum OperationKind {
+    Drill { strategy: DrillStrategy, locations: Locations, depth: f64 },
+    Pocket { geometry: GeometryRef, stepover: f64, stepdown: f64 },
+    // ...
+}
+```
+
+`Operation` methods match on `kind` and delegate to per-type modules. No traits needed — the operation set is closed at compile time, so the match is the dispatch:
+
+```rust
+impl Operation {
+    pub fn generate(&self) -> Vec<ToolpathSegment> {
+        match &self.kind {
+            OperationKind::Drill { .. } => drill::generate(self),
+            OperationKind::Pocket { .. } => pocket::generate(self),
+            // ...
+        }
+    }
+
+    pub fn compile(&self, segments: &[ToolpathSegment]) -> Vec<NCBlock> {
+        match &self.kind {
+            OperationKind::Drill { .. } => drill::compile(self, segments),
+            OperationKind::Pocket { .. } => pocket::compile(self, segments),
+            // ...
+        }
+    }
+}
+```
+
+Per-type functions receive `&Operation` and extract what they need from `kind` internally. Adding a new operation type requires:
+
+1. Add the variant to `OperationKind`.
+2. Create the per-type module with `generate()` and `compile()`.
+3. Add the match arm in each `Operation` method — the compiler enforces this.
+
+See [discussion-operation-type-modeling.md](discussion-operation-type-modeling.md) for the full analysis behind this decision.
 
 ## Envelope/Body Split
 
-The NC compiler separates the **envelope** (tool change, spindle on, clearance rapid, spindle off) from the **body** (operation-specific blocks). Currently `compiler.rs` produces the full block list for manual drill; in the planned architecture, the compiler wraps any operation type's body with the standard envelope.
+The NC compiler separates the **envelope** (tool change, spindle on, clearance rapid, spindle off) from the **body** (operation-specific blocks). The `compile()` trait method for each operation type produces the body; the envelope wrapping is shared logic.
 
-This means post-processors don't need to worry about whether tool changes or spindle commands are in the right place — the compiler handles that. The PP just formats whatever blocks it receives.
+This means post-processors don't need to worry about whether tool changes or spindle commands are in the right place — the envelope handles that. The PP just formats whatever blocks it receives.
 
 ## Post-Processor Execution
 

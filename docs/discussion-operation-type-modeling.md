@@ -44,41 +44,11 @@ The current approach of a broad `OperationType` category enum + a `strategy` sub
 
 ---
 
-## Approach 1: Flat enum with per-variant structs (current direction, expanded)
+## Decision: Shared struct + kind enum with direct dispatch
 
-Each operation type gets its own params struct. The top-level enum carries both common and specific fields.
+Common fields live in a single `Operation` struct. Only the type-specific parameters go into an `OperationKind` enum. `Operation` exposes `generate()` and `compile()` methods that match on `kind` and delegate to per-type modules.
 
-```rust
-pub struct PocketParams  { pub stepover: f64, pub stepdown: f64, pub geometry: GeometryRef }
-pub struct DrillParams   { pub strategy: DrillStrategy, pub depth: f64 }
-pub struct TapParams     { pub pitch: f64, pub depth: f64, pub direction: SpindleDirection }
-pub struct ProfileParams { pub offset_side: Side, pub stepdown: f64, pub geometry: GeometryRef }
-
-pub enum OperationConfig {
-    Pocket  { common: CommonOperationConfig, params: PocketParams },
-    Drill   { common: CommonOperationConfig, params: DrillParams },
-    Tap     { common: CommonOperationConfig, params: TapParams },
-    Profile { common: CommonOperationConfig, params: ProfileParams },
-    // ...
-}
-```
-
-### Pros
-- Maximally explicit. Every variant's data is visible at a glance.
-- Serde `#[serde(tag = "type")]` maps cleanly to YAML.
-- Every `match` arm is exhaustive — the compiler catches unhandled cases.
-- Close to the existing structure.
-
-### Cons
-- The `common` field must be destructured in every match arm. Accessing `operation.common.tool_name` requires matching first.
-- As the number of operation types grows (15-20 across drilling/milling/turning), the enum and all match statements in `run_job` and the compiler become long.
-- No shared behavior without extracting it manually each time.
-
----
-
-## Approach 2: Shared struct + kind enum (params-only enum)
-
-Common fields live in a single `Operation` struct. Only the type-specific parameters go into an enum.
+### Data model
 
 ```rust
 pub struct Operation {
@@ -103,50 +73,50 @@ pub enum OperationKind {
 }
 ```
 
-### Pros
-- Common fields live in one place. `operation.tool` works without matching. No repetitive destructuring.
-- The `kind` enum only carries what differs between operation types.
-- Match statements are smaller — they only dispatch on the type-specific logic.
-- Serde still works: `#[serde(tag = "type")]` on `OperationKind`, `#[serde(flatten)]` on the common fields in the YAML config struct.
-- Exhaustive matching is preserved.
+### Behavior via direct dispatch
 
-### Cons
-- Cannot enforce at the type level that e.g. "tapping requires a specific spindle direction" — that becomes runtime validation.
-- All shared fields are accessible even when they might not be meaningful for a particular kind (though in this project, tool + clearance truly are universal to every operation).
-
----
-
-## Approach 3: Trait-based polymorphism
-
-Each operation type is a standalone struct that implements a shared `Operation` trait.
+`Operation` methods match on `kind` and delegate to per-type modules. No traits needed — the operation set is closed at compile time, so the match *is* the dispatch.
 
 ```rust
-pub trait Operation {
-    fn name(&self) -> &str;
-    fn tool(&self) -> &Tool;
-    fn clearance(&self) -> f64;
+impl Operation {
+    pub fn generate(&self) -> Vec<ToolpathSegment> {
+        match &self.kind {
+            OperationKind::Drill { .. } => drill::generate(self),
+            OperationKind::Pocket { .. } => pocket::generate(self),
+            // ...
+        }
+    }
 
-    fn generate_toolpath(&self) -> Vec<ToolpathSegment>;
-    fn validate(&self) -> Result<(), ValidationError>;
+    pub fn compile(&self, segments: &[ToolpathSegment]) -> Vec<NCBlock> {
+        match &self.kind {
+            OperationKind::Drill { .. } => drill::compile(self, segments),
+            OperationKind::Pocket { .. } => pocket::compile(self, segments),
+            // ...
+        }
+    }
 }
-
-pub struct DrillOp  { name: String, tool: Tool, clearance: f64, strategy: DrillStrategy, ... }
-pub struct PocketOp { name: String, tool: Tool, clearance: f64, stepover: f64, ... }
-
-impl Operation for DrillOp  { ... }
-impl Operation for PocketOp { ... }
 ```
 
-### Pros
-- Each type is fully self-contained. Adding a new operation type doesn't touch any existing code.
-- Behavior (toolpath generation, validation) is co-located with data.
-- Clean for an "open" extension model where types are discovered at runtime.
+Per-type functions receive `&Operation` and extract what they need from `self.kind` internally. The dispatch matches live in `operations/mod.rs`. The actual logic lives in `operations/drill.rs`, `operations/pocket.rs`, etc. Adding a new operation type means:
 
-### Cons
-- Exhaustive matching is lost. `dyn Operation` or `Box<dyn Operation>` means the compiler cannot tell you "you added `TapOp` but forgot to handle it in the NC compiler."
-- Serde deserialization from YAML becomes painful — you need a manual deserializer or a dispatch enum anyway, which negates the benefit.
-- The operation set is known at compile time in this project (toolpath plugins are Rust traits, not runtime-discovered), so the "open for extension" benefit is mostly theoretical.
-- Common fields (name, tool, clearance) are duplicated across every struct.
+1. Add the variant to `OperationKind` — compiler errors guide you to every match.
+2. Create the per-type module with `generate()` and `compile()`.
+3. Add the match arm in each `Operation` method.
+
+### Why this design
+
+- **Common fields in one place.** `operation.tool` works without matching. No repetitive destructuring.
+- **Exhaustive matching preserved.** The operation set is closed at compile time. When a new variant is added, the compiler forces you to handle it in every match.
+- **No self-referential indirection.** Methods live on `Operation` directly — no traits on a field that need the parent passed back in.
+- **Behavior is organized, not monolithic.** The match in `Operation` is thin (one line per variant). The real work lives in per-type modules.
+- **YAML ergonomics work.** `#[serde(tag = "type")]` on `OperationKind` + `#[serde(flatten)]` for common fields maps directly to the current YAML format.
+- **Category grouping is cosmetic.** "Drilling vs milling" can be a derived method on `OperationKind` or a comment in the enum — not a structural layer.
+
+### Tradeoffs accepted
+
+- Type-level enforcement of per-operation constraints (e.g. "tapping requires CW spindle") is not possible — these become runtime validation.
+- All shared fields are accessible on every operation, even if not all are equally meaningful for every kind. In practice, tool + clearance + name are universal.
+- The dispatch match is duplicated across `generate()` and `compile()`, but each is small and mechanical — one line per variant.
 
 ---
 
@@ -186,31 +156,116 @@ operations:
     geometry: outline.svg
 ```
 
-Serde's `#[serde(tag = "type")]` with internally tagged enums handles this naturally for both Approach 1 and 2. Approach 3 requires a manual dispatch layer on top.
+Serde's `#[serde(tag = "type")]` with internally tagged enums handles this naturally.
 
 ---
 
-## Summary table
+## Refactoring Plan
 
-| Criterion | Approach 1 (flat enum) | Approach 2 (shared + kind) | Approach 3 (traits) |
-|-----------|----------------------|---------------------------|-------------------|
-| Common field access | Match every arm | Direct (`op.tool`) | Via trait method |
-| Exhaustive matching | Yes | Yes | No |
-| Serde from YAML | Clean | Clean | Manual dispatch |
-| Adding a new type | Touch enum + all matches | Touch kind enum + matches | New struct + impl only |
-| Code at 15+ types | Verbose match arms | Manageable | Clean per-type, messy dispatch |
-| Compile-time safety | Full | Full | Partial |
-| Field duplication | `common` in every variant | None | Every struct |
+> **Disclaimer:** This plan was generated by Claude (Sonnet 4.6 / Opus 4.6), an AI assistant by Anthropic. It reflects the agreed-upon design from the discussion above and the current code state as of 2026-03-28. Intended as a guide for the project author to implement.
 
----
+### Context
 
-## Recommendation
+Operations are currently spread across three modules: type definitions in `core/operation.rs`, toolpath generation in `toolpath/drill.rs`, and NC compilation in `nc/compiler.rs`. This means every new operation type touches three places. The design above consolidates this into a single `operations/` module with a shared `Operation` struct, an `OperationKind` enum, and `generate()`/`compile()` methods on `Operation` that dispatch to per-type modules.
 
-**Approach 2 (shared struct + kind enum)** is the best fit for this project because:
+### Step 1 — Create `src/operations/mod.rs`
 
-1. **Common fields are genuinely universal.** Every operation has a tool, clearance, name, and (eventually) skip level. Duplicating those is noise.
-2. **The operation set is closed at compile time.** Exhaustive matching catches unhandled types in the toolpath generator and NC compiler.
-3. **YAML ergonomics work out of the box.** `#[serde(tag = "type")]` on `OperationKind` + `#[serde(flatten)]` for common fields maps directly to the current YAML format.
-4. **It matches the existing data flow.** In `run_job`, common fields are already extracted identically in every arm, then type-specific logic is dispatched. Approach 2 makes that structure explicit.
+Define the types and dispatch methods:
 
-The category grouping (drilling/milling/turning) can be a derived method on `OperationKind` or a simple comment in the enum definition, rather than a structural layer.
+```rust
+pub struct Operation {
+    pub name: String,
+    pub tool: Tool,
+    pub clearance: f64,
+    pub capabilities: PostprocessorCapabilities,
+    pub kind: OperationKind,
+}
+
+pub enum OperationKind {
+    Drill { strategy: DrillStrategy, locations: OperationLocations },
+}
+
+impl Operation {
+    pub fn generate(&self) -> Vec<ToolpathSegment> {
+        match &self.kind {
+            OperationKind::Drill { .. } => drill::generate(self),
+        }
+    }
+
+    pub fn compile(&self, segments: &[ToolpathSegment]) -> Vec<NCBlock> {
+        match &self.kind {
+            OperationKind::Drill { .. } => drill::compile(self, segments),
+        }
+    }
+}
+```
+
+Move `DrillStrategy`, `OperationLocations`, and `Pattern` here from their current locations.
+
+### Step 2 — Create `src/operations/drill.rs`
+
+Merge logic from `toolpath/drill.rs` and `nc/compiler.rs`:
+- `pub fn generate(op: &Operation) -> Vec<ToolpathSegment>` — point extraction + toolpath segment creation (from `nc/compiler.rs:process_drilling()` and `toolpath/drill.rs:manual_drill_toolpath()`)
+- `pub fn compile(op: &Operation, segments: &[ToolpathSegment]) -> Vec<NCBlock>` — NC block envelope + body (from `nc/compiler.rs:compile_manual_drill()`)
+
+### Step 3 — Move `src/toolpath/patterns.rs` → `src/operations/patterns.rs`
+
+No logic changes, just the move.
+
+### Step 4 — Delete `src/toolpath/`
+
+Remove `src/toolpath/mod.rs`, `src/toolpath/drill.rs`, `src/toolpath/patterns.rs`. The module is fully absorbed into `operations/`.
+
+### Step 5 — Delete `src/nc/compiler.rs`
+
+Remove the file. Update `src/nc/mod.rs` to remove `pub mod compiler;`. What remains in `nc/`: `ir.rs`, `bridge.rs`, `postprocessors.rs`.
+
+### Step 6 — Clean up `src/core/operation.rs`
+
+Delete the file — everything moved to `operations/`. Update `src/core/mod.rs` to remove `pub mod operation;`. What remains in `core/`: `tool.rs`, `toolpath.rs` (ToolpathSegment, MoveType), `postprocessors.rs`, `units.rs`.
+
+### Step 7 — Update `src/lib.rs`
+
+```rust
+// Remove:  pub mod toolpath;
+// Add:     pub mod operations;
+```
+
+### Step 8 — Update `src/io/job.rs`
+
+The main integration point:
+- Remove imports from `core::operation` and `nc::compiler`
+- Import from `operations` instead
+- `OperationConfig` serde enum stays here (YAML deserialization layer)
+- `run_job()` simplifies: build an `Operation` from each `OperationConfig`, then call `operation.generate()` followed by `operation.compile()`, pass resulting blocks to `nc::bridge::generate_nc()`
+
+### Step 9 — Verify `src/bin/chipmunk.rs`
+
+Likely no changes needed — it only imports `load_job`, `run_job`, and `nc::postprocessors`.
+
+### Step 10 — Test
+
+```bash
+cargo build
+cargo test
+cargo clippy
+```
+
+The integration tests in `tests/nc_output.rs` compare byte-for-byte against expected NC output fixtures (`drill.yaml` → `drill.h`, `CYCLE200.yaml` → `CYCLE200.h`). These must still pass with identical output.
+
+### Files summary
+
+| File | Action |
+|------|--------|
+| `src/operations/mod.rs` | **Create** — Operation, OperationKind, generate/compile dispatch |
+| `src/operations/drill.rs` | **Create** — drill generate + compile |
+| `src/operations/patterns.rs` | **Move** from `src/toolpath/patterns.rs` |
+| `src/core/operation.rs` | **Delete** |
+| `src/core/mod.rs` | **Edit** — remove `pub mod operation` |
+| `src/toolpath/mod.rs` | **Delete** |
+| `src/toolpath/drill.rs` | **Delete** |
+| `src/toolpath/patterns.rs` | **Delete** (moved) |
+| `src/nc/compiler.rs` | **Delete** |
+| `src/nc/mod.rs` | **Edit** — remove `pub mod compiler` |
+| `src/lib.rs` | **Edit** — replace `pub mod toolpath` with `pub mod operations` |
+| `src/io/job.rs` | **Edit** — rewire imports, simplify `run_job()` |
