@@ -1,0 +1,16 @@
+name: drilltest
+postprocessor: heidenhain
+clearance: 5.0
+
+operations:
+  - name: Manual Drilling test
+    type: quill
+    tool_number: 1
+    tool_name: "Centerdrill"
+    tool_diameter: 3.0
+    spindle_speed: 1200
+    pattern:
+      type: "circular"
+      cc: [0,0]
+      diameter: 20
+      count: 8

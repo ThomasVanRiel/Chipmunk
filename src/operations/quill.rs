@@ -1,5 +1,5 @@
 use crate::{
-    core::toolpath::{Locations, MoveType, ToolpathSegment},
+    core::toolpath::{Locations, MoveType, Pattern, ToolpathSegment},
     nc::ir::NCBlock,
     operations::{OperationCommon, OperationType},
 };
@@ -24,10 +24,16 @@ impl OperationType for Quill {
             Locations::Pattern { pattern } => {
                 // TODO: For patterns, we need to check if the pattern is in the PP capabilities.
                 // If it is not, we expand the pattern into points.
-                Err(anyhow!(
-                    "Drilling pattern {:?} not implemented yet!",
-                    pattern
-                ))
+                Ok(pattern
+                    .into_points()?
+                    .iter()
+                    .map(|[x, y]| ToolpathSegment {
+                        move_type: MoveType::Rapid,
+                        x: *x,
+                        y: *y,
+                        z: common.clearance,
+                    })
+                    .collect::<Vec<_>>())
             }
         }
     }
