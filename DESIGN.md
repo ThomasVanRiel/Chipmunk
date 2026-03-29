@@ -23,13 +23,16 @@ The CLI calls library functions directly — no HTTP, no server process. A REST 
 
 ```
 YAML job file (geometry: path/to/file.svg)
-  → io/: parse geometry, group by stroke color
-  → core/: Tool, Setup, Operation structs
+  → io/parsing: deserialize JobConfig → OperationConfig → Operation (YAML-specific adapter)
+  → io/geometry: parse SVG/DXF, group entities by stroke color
+  → operations/: Operation structs (OperationCommon + OperationVariant)
   → toolpath/: generate segments (rapid, linear, arc, drill point)
   → nc/: compile to NCBlock IR (controller-neutral)
   → nc/bridge: Lua VM → post-processor → NC string
   → .H / .nc / .gcode file
 ```
+
+Note: `OperationConfig` is a YAML-specific IO type — it lives in `io/` because it is an IO concern. Other interfaces (REST API, language bindings) construct `Operation` directly using their own input schema, without going through `OperationConfig`. Each IO surface owns its own config-to-operation conversion.
 
 ### Module Dependency Rules
 
@@ -93,9 +96,11 @@ Optional. Not required for toolpath generation — the operator knows their stoc
 
 ### Tool
 
-Tools carry physical geometry (diameter, flute length, type) and recommended cutting data (feed, speed, coolant) that auto-populate operations when selected. User can always override per-operation.
+Current fields: `tool_number`, `name`, `diameter`, `spindle_speed`, `spindle_direction`.
 
-**Tool library** resolves from up to four sources, highest priority first:
+Planned: physical geometry fields (`flute_length`, `tool_type`) and recommended cutting data (`feed_rate`, `coolant`) that auto-populate operations when selected. User can always override per-operation.
+
+**Tool library** resolves from up to four sources, highest priority first (planned — currently all operations receive `Tool::default()`):
 
 1. Hardcoded inline on the operation (no ID, all params written directly)
 2. Inline `tools:` section in the job YAML
@@ -108,14 +113,16 @@ On ID collision, higher-priority source wins. Missing tool reference = hard erro
 
 ### Operation
 
-A single struct for all operation types (Facing, Profile, Pocket, Drill). Type-specific fields are `None` when not applicable. This simplifies serialization and API contracts.
+Operations are modeled as `OperationCommon` (shared fields: name, tool, clearance, postprocessor capabilities) + `OperationVariant` enum (one variant per operation type) + `OperationType` trait (per-type `generate()` and `compile()` implementations).
 
-Key parameters shared across types: feed_rate, plunge_rate, spindle_speed, depth_per_pass, start_depth, final_depth, coolant.
+The enum provides exhaustive dispatch via a single `kind_impl()` match. The trait encapsulates all type-specific logic. Code duplication across operation types is preferred over shared abstractions.
+
+Planned shared parameters (not yet on `OperationCommon`): feed_rate, plunge_rate, spindle_speed, depth_per_pass, start_depth, final_depth, coolant.
 
 **Drill operations** support two geometry sources (mutually exclusive):
 
-- `color:` — circles of that stroke color in the geometry file become drill points
-- `points:` — explicit XY coordinates in the YAML
+- `color:` — circles of that stroke color in the geometry file become drill points (planned — Phase 3, SVG/DXF import)
+- `points:` — explicit XY coordinates in the YAML (current)
 
 Both missing or both present = hard error.
 
@@ -134,11 +141,13 @@ Operations can be marked optional with a skip level (1–9). Post-processors imp
 
 ### Toolpath
 
-A sequence of segments: Rapid, Linear, ArcCw, ArcCcw. Segments carry XYZ coordinates, optional arc center offsets (i, j), and optional feed rate. Computed metadata includes total distance, cutting distance, and estimated time.
+A sequence of `ToolpathSegment` values. Each segment has `move_type` (Rapid, Linear, ArcCw, ArcCcw) and `x`, `y`, `z` coordinates.
+
+Planned: arc center offsets (`i`, `j`) on arc segments; per-segment `feed_rate`; computed metadata (total distance, cutting distance, estimated time).
 
 ### Parallel Toolpath Generation
 
-Operations are independent of each other — each operation's toolpath depends only on its own parameters and geometry. Toolpath generation for all operations runs in parallel, each on its own thread. Results are collected and ordered by operation sequence before NC compilation. NC compilation itself is sequential (the output order matters).
+Operations are independent of each other — each operation's toolpath depends only on its own parameters and geometry. Toolpath generation is currently sequential; parallel execution via rayon is planned. Results are ordered by operation sequence before NC compilation. NC compilation itself is sequential (the output order matters).
 
 **Future constraint: simulation-driven rest machining.** When stock simulation is implemented, each operation's toolpath can be generated against the actual remaining stock (computed by simulating all prior operations), not just the original stock shape. This means operations become sequentially dependent — the toolpath generator receives the simulated stock state as input. This is more accurate than conventional rest machining (which only compares tool diameters) because it accounts for the actual material removal of every previous pass. Until stock simulation exists, all operations are independent and fully parallelizable.
 
@@ -152,9 +161,11 @@ Operations are independent of each other — each operation's toolpath depends o
 
 ### NCBlock IR
 
-The atomic unit of NC output. Each block type represents one logical instruction. The IR includes: Comment, Rapid, Linear, ArcCw, ArcCcw, ToolChange, SpindleOn, SpindleOff, CoolantOn, CoolantOff, Dwell, Stop, OptionalStop, ProgramEnd, SetUnits, SetWorkOffset, SetPlane, SetMode, SetFeedMode, CompLeft, CompRight, CompOff, CycleDefine, CycleCall, CycleOff, OptionalSkipStart, OptionalSkipEnd.
+The atomic unit of NC output. Each block type represents one logical instruction. Blocks use typed enum variants with per-variant fields (not a HashMap).
 
-Blocks use typed enum variants with per-variant fields (not a HashMap).
+**Current variants:** `OperationStart`, `OperationEnd`, `ToolChange`, `Comment`, `Stop`, `SpindleOn`, `SpindleOff`, `Retract` (to clearance height), `RetractFull`, `Rapid`, `Linear` (with feed), `CycleDrill`.
+
+**Planned variants:** ArcCw, ArcCcw, CoolantOn, CoolantOff, Dwell, OptionalStop, ProgramEnd, SetUnits, SetWorkOffset, SetPlane, SetMode, SetFeedMode, CompLeft, CompRight, CompOff, CycleDefine, CycleCall, CycleOff, OptionalSkipStart, OptionalSkipEnd.
 
 ### NC Compiler
 
@@ -169,22 +180,20 @@ The compiler separates the **envelope** (tool change, spindle, coolant, clearanc
 
 The compiler tracks modal state and omits redundant values (e.g., consecutive linear moves at the same feed).
 
-### Operation Body via compile_nc
+### Operation Body via compile
 
-Each operation type provides its body blocks via a `compile_nc` method on the `OperationType` trait. If `compile_nc` returns `None`, the compiler falls back to generic 1:1 conversion of toolpath segments to NCBlocks.
+Each operation type provides its body blocks via the `compile` method on the `OperationType` trait. It takes `OperationCommon` and the pre-generated `&[ToolpathSegment]` and returns `Result<Vec<NCBlock>>`.
 
-**Drilling** always returns `Some` from `compile_nc` because all drill strategies produce structurally different IR:
+**Current drilling** (`Quill` and `Drill`) emit: `OperationStart`, `Stop`, `Comment`, `SpindleOn`, `Retract`, one `Rapid` per drill point, `Retract`, `OperationEnd`.
 
-- Manual: Comment + Stop + Rapids (no canned cycle, works on every controller)
-- Cycle-based (simple, peck, bore, tap): CycleDefine + CycleCall blocks when the post-processor supports the cycle type; returns `None` to fall back to explicit moves otherwise
-
-**Milling** (facing, profile, pocket) typically returns `None` — the generic segment-to-block conversion is sufficient.
+**Planned:** An optional-return fallback design where `compile` returns `None` to signal the compiler should fall back to generic 1:1 segment-to-block conversion. Cycle-based strategies (peck, bore, tap) would emit `CycleDefine + CycleCall` when the post-processor declares support, falling back to explicit moves otherwise. Milling operations (facing, profile, pocket) would use this fallback path.
 
 ### Canned Cycles
 
-The IR supports CycleDefine / CycleCall / CycleOff blocks. Toolpath generators always produce explicit moves as fallback. Canned cycles are preferred by default (`use_canned_cycle: true`) and emitted when the post-processor declares support.
+Currently the IR has a single `CycleDrill` block that carries all drill cycle parameters inline (depth, surface_position, plunge_depth, feed, dwell_top, dwell_bottom, clearance, second_clearance, tip_trough).
 
-Post-processors declare support via `M.supported_cycles = { "drill", "peck_drill", ... }`. Unsupported cycle types fall back to explicit moves automatically.
+Planned: split into `CycleDefine` / `CycleCall` / `CycleOff` to allow one cycle definition followed by multiple call positions. Post-processors would declare support via `M.supported_cycles = { "drill", "peck_drill", ... }`, with unsupported types falling back to explicit moves automatically.
+
 > Q: How will the function signature be passed to the Lua bridge?
 
 | IR cycle_type | G-code | Heidenhain |
@@ -214,29 +223,28 @@ Key differences: mandatory line numbering, explicit sign on coordinates (`X+10`)
 
 ### Capability Querying
 
-Before compiling, the NC compiler queries the post-processor's Lua module for its capabilities (supported cycle types, optional skip strategy). This determines whether cycles or explicit moves are emitted.
+Before compiling, the NC compiler queries the post-processor's Lua module for its capabilities. Currently `PostprocessorCapabilities` carries only `cycles: HashMap<String, Vec<String>>`. Planned: optional skip strategy field.
 
 ---
 
 ## Operation Type System
 
-Toolpath operation types are Rust structs implementing the `OperationType` trait. They are registered at compile time in a static registry — no runtime discovery.
+Toolpath operation types are Rust structs in `src/operations/` implementing the `OperationType` trait. Currently: `Quill` (manual quill drill — rapids only, no power feed) and `Drill` (same behaviour as Quill for now; will diverge when automatic drill strategies are added).
 
-The trait provides:
+The trait currently provides:
 
-- `type_id()` / `display_name()` — identification
-- `parameter_schema()` — describes accepted parameters (drives UI and validation)
-- `validate()` — only errors for physically impossible situations
-- `generate()` — produces explicit toolpath segments (used for visualization and as fallback)
-- `compile_nc()` — optionally produces optimized NCBlocks (e.g., canned cycles for drilling)
+- `generate(&self, common: &OperationCommon) -> Result<Vec<ToolpathSegment>>` — produces toolpath segments
+- `compile(&self, common: &OperationCommon, segments: &[ToolpathSegment]) -> Result<Vec<NCBlock>>` — produces IR blocks
+
+Planned additions to the trait: `type_id()` / `display_name()` for identification, `parameter_schema()` for UI/validation, `validate()` for geometry impossibility checks.
 
 **Adding a new operation type:**
 
-1. Create struct in `toolpath/`, implement `OperationType`
-2. Register in the static registry
+1. Create struct in `src/operations/`, implement `OperationType`
+2. Add a variant to `OperationVariant` and a match arm in `kind_impl()`
 3. Add integration tests
 
-**Adding a new drill strategy** is lighter — add a variant to `DrillStrategy`, add the match arms in `generate()` and `compile_nc()`.
+**Adding a new drill strategy** — add a `DrillStrategy` enum to `Drill`, add match arms in `generate()` and `compile()`.
 
 ---
 
@@ -273,9 +281,9 @@ Handles islands (raised features) naturally through polygon interior rings. Entr
 
 ### Drill
 
-Point-based. Strategies: manual (rapids only, operator drills by hand), simple (feed to depth, retract), peck (incremental feed with full retract), chip break (incremental feed with partial retract), bore (feed down and up at boring rate), tap (synchronized feed).
+Point-based. Currently implemented: rapids-only (operator drills by hand, spindle provides only positioning). Planned strategies: simple (feed to depth, retract), peck (incremental feed with full retract), chip break (partial retract), bore, tap.
 
-Drill point patterns: explicit `[x, y]` coordinates, or `circle_pattern`, `line_pattern`, `rect_pattern` — preserved through the IR for native post-processor pattern support.
+Drill point geometry sources: `points` (explicit `[x, y]` coordinates — current) and `pattern` (currently `Circular` only; `into_points()` expansion not yet implemented). Planned patterns: `line_pattern`, `rect_pattern`. Patterns may be preserved through the IR for native post-processor pattern support.
 
 ### Segment Ordering
 
@@ -287,7 +295,9 @@ Nearest-neighbor heuristic to minimize rapid travel between toolpath segments.
 
 ### YAML Job Files
 
-The sole input for NC generation. Declares the post-processor, clearance height, units, geometry file path, tool definitions, and operations with their parameters and color bindings.
+The sole input for NC generation via the CLI. Declares the post-processor, clearance height, units, geometry file path, tool definitions, and operations with their parameters and color bindings.
+
+Parsed via `io/parsing`: `JobConfig` → `Vec<OperationConfig>` → `Vec<Operation>`. `OperationConfig` and `JobConfig` are YAML-specific deserialization types. They are not part of the core operation type system — they exist only to bridge the YAML format to the library's `Operation` struct. Other IO surfaces (REST API, programmatic callers) construct `Operation` directly.
 
 ### SVG Import
 

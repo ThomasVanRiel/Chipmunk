@@ -53,7 +53,10 @@ impl Pattern {
                 angle_stop,
                 angle_step,
                 count,
-            } => Err(anyhow!("Not implemented yet")),
+            } => {
+                let p0 = cc;
+                Err(anyhow!("Not implemented yet"))
+            }
         }
     }
 }

@@ -21,9 +21,7 @@ When in doubt: document, don't code.
 
 ## Implementation Status
 
-**Pre-implementation** — only design documentation exists. No source code has been written yet. Phase 1 (backend scaffolding + SVG/DXF import) is the starting point. See `design/docs/07-implementation-phases.md` for the full phased breakdown.
-
-All `src/`, `postprocessors/`, and `frontend/` paths described below are planned structure, not yet on disk.
+**Active implementation** — Phase 1 is underway. Core scaffolding, operation type system, and YAML parsing are in place. See `DESIGN.md` for the full phased breakdown.
 
 ## Architecture
 
@@ -36,13 +34,17 @@ All `src/`, `postprocessors/`, and `frontend/` paths described below are planned
 ### Data Flow
 
 ```
-YAML job (geometry: path/to/file.svg) → io/: parse geometry, group by stroke color
-    → core/: Tool, Setup, Operation
+YAML job (geometry: path/to/file.svg)
+    → io/parsing: JobConfig → OperationConfig → Operation  (YAML-specific adapter)
+    → io/geometry: parse SVG/DXF, group entities by stroke color
+    → operations/: Operation (OperationCommon + OperationVariant + OperationType trait)
     → toolpath/: segments (rapid, linear, arc, drill point)
     → nc/: NCBlock IR (controller-neutral)
     → nc/bridge: Lua post-processor → NC string
     → .H / .nc / .gcode file
 ```
+
+`OperationConfig` is a YAML-specific type in `io/`. It is not part of the core operation type system. Other IO surfaces (REST API, bindings) construct `Operation` directly — each IO layer owns its own config-to-operation conversion.
 
 ### Module Dependency Rules (no circular deps)
 

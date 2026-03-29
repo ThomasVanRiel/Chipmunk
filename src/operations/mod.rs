@@ -1,9 +1,11 @@
+pub mod drill;
 pub mod quill;
 use crate::{
     core::{postprocessors::PostprocessorCapabilities, tool::Tool, toolpath::ToolpathSegment},
     nc::ir::NCBlock,
 };
 use anyhow::Result;
+use drill::Drill;
 use quill::Quill;
 
 pub struct Operation<'a> {
@@ -20,6 +22,7 @@ pub struct OperationCommon<'a> {
 
 pub enum OperationVariant {
     Quill(Quill),
+    Drill(Drill),
 }
 
 pub trait OperationType {
@@ -34,7 +37,8 @@ pub trait OperationType {
 impl<'a> Operation<'a> {
     fn kind_impl(&self) -> &dyn OperationType {
         match &self.kind {
-            OperationVariant::Quill(q) => q,
+            OperationVariant::Quill(o) => o,
+            OperationVariant::Drill(o) => o,
         }
     }
 

@@ -27,11 +27,11 @@ function M.generate(blocks, context)
     for _, block in ipairs(blocks) do
         if block.type == "rapid" then
             out[#out+1] = string.format("G0 X%.3f Y%.3f Z%.3f",
-                block.x or 0, block.y or 0, block.z or 0)
+                block.x, block.y, block.z)
         elseif block.type == "tool_change" then
             out[#out+1] = string.format("T%d M6", block.tool_number)
         elseif block.type == "comment" then
-            out[#out+1] = "(" .. block.comment .. ")"
+            out[#out+1] = "(" .. block.text .. ")"
         elseif block.type == "stop" then
             out[#out+1] = "M0"
         elseif block.type == "spindle_on" then
@@ -39,6 +39,8 @@ function M.generate(blocks, context)
         elseif block.type == "spindle_off" then
             out[#out+1] = "M5"
         end
+        -- Unrecognised block types are silently ignored.
+        -- Add elseif branches as you need more block types.
     end
 
     out[#out+1] = "M30"
@@ -67,8 +69,7 @@ Your Lua file must return a table. The required and optional fields:
 | `name` | string | yes | Human-readable name (e.g. `"Haas VF-2"`) |
 | `file_extension` | string | yes | Output file extension including dot (e.g. `".nc"`, `".h"`) |
 | `generate(blocks, context)` | function | yes | Takes IR blocks and context, returns NC code string. On error: return `nil, "message"`. |
-| `supported_cycles` | table | no | List of canned cycle type strings this PP handles. Omit for no cycle support. |
-| `optional_skip_strategy` | string | no | `"block_delete"` (default) or `"jump"`. Controls how optional operations are skipped. |
+| `capabilities` | table | no | Declares optional PP features. Omit entirely if not needed — defaults to no cycle support. See [Capabilities](#capabilities). |
 
 ### generate(blocks, context)
 
@@ -79,27 +80,48 @@ This is the only function Chipmunk calls. It receives the full IR block list and
 - Success: return the NC string. A trailing newline is added automatically if missing.
 - Error: return `nil, "descriptive error message"`. Chipmunk prints the message to stderr and exits with code 1. Use this for machine-specific validation (overtravel, unsupported block type, etc.).
 
-### supported_cycles
+### Capabilities
+
+`M.capabilities` is a table that declares optional PP features. Currently only `cycles` is read by Chipmunk; `patterns` is planned.
 
 ```lua
-M.supported_cycles = { "drill", "peck_drill", "bore", "tap" }
+M.capabilities = {
+    -- Declare which canned cycle types this PP handles natively.
+    -- Omit or leave empty for no cycle support.
+    cycles = {
+        drilling    = {},
+        peck_drill  = {},
+        bore        = {},
+        tap         = {},
+    },
+
+    -- (Planned) Declare which drill point patterns this PP can emit natively.
+    -- If a pattern type is not declared, Chipmunk expands it into individual points
+    -- before passing them to generate(). If declared, the pattern block is passed
+    -- through as-is so your PP can emit a native pattern cycle.
+    patterns = {
+        circular = {},
+    },
+}
 ```
 
-When declared, the NC compiler emits `cycle_define` / `cycle_call` / `cycle_off` blocks for matching drill strategies instead of explicit moves. If omitted or empty, your PP only receives basic motion blocks — no cycle handling needed.
+For both `cycles` and `patterns`, each key is a type name and the value is an empty table (reserved for future per-type parameters). Omit the entire `capabilities` field if you need neither.
 
-Cycle types: `"drill"`, `"peck_drill"`, `"spot_drill"`, `"bore"`, `"tap"`, `"chip_break"`.
+Cycle types: `"drilling"`, `"peck_drill"`, `"spot_drill"`, `"bore"`, `"tap"`, `"chip_break"`.
+
+Pattern types (planned): `"circular"`, `"line"`, `"rect"`.
 
 ---
 
 ## IR Block Reference
 
-Every block passed to `generate()` is a Lua table with a `type` field (string) and type-specific parameters. All parameter values are numbers or strings — no nested tables.
+Every block passed to `generate()` is a Lua table with a `type` field (string) and type-specific parameters. Parameter values are numbers, strings, or booleans — no nested tables.
 
 ### Design principles
 
 - Always output as much information as possible in the IR blocks.
-  - Plane coordinates are always provided fully, the postprocessor can optimize unchanged coordinates. Height
-  - Feed rate is always emitted in linear moves, the postprocessor can optimize.
+  - Plane coordinates are always provided fully; the postprocessor can optimise unchanged coordinates.
+  - Feed rate is always emitted in linear moves; the postprocessor can optimise modal state.
 - Program start and end is machine specific, the postprocessor handles it.
 
 ### Currently Implemented
@@ -108,12 +130,17 @@ These block types are emitted by the current codebase:
 
 | Type | Parameters | Description |
 |---|---|---|
+| `operation_start` | `text` (string or nil) | Marks the beginning of an operation. Optional label. |
+| `operation_end` | `text` (string or nil) | Marks the end of an operation. Optional label. |
 | `tool_change` | `tool_number` (number or nil), `spindle_speed` (number) | Tool change. Heidenhain merges spindle speed into `TOOL CALL`. |
-| `comment` | `comment` (string) | Operator comment. Note: the param is `comment`, not `text`. |
+| `comment` | `text` (string) | Operator comment. |
 | `stop` | *(none)* | Mandatory program stop (M0). |
 | `spindle_on` | `direction` (`"cw"` or `"ccw"`) | Start spindle. No speed — speed is on `tool_change`. |
 | `spindle_off` | *(none)* | Stop spindle. |
-| `rapid` | `x` (number/nil), `y` (number/nil), `z` (number/nil) | Rapid positioning move. Any axis can be nil (not moving on that axis). |
+| `retract` | `height` (number) | Rapid retract to a specific clearance height. |
+| `retract_full` | *(none)* | Rapid retract to machine home / maximum Z. |
+| `rapid` | `x` (number), `y` (number), `z` (number) | Rapid positioning move. All three axes are always present. |
+| `linear` | `x` (number), `y` (number), `z` (number), `feed` (number) | Linear interpolation move with feed rate. |
 
 ### Planned (Not Yet Implemented)
 
@@ -121,9 +148,9 @@ These block types are defined in the design but not yet emitted. They will arriv
 
 | Type | Parameters | Description |
 |---|---|---|
-| `linear` | `x`, `y`, `z`, `f` (feed rate, nil if modal) | Linear interpolation (G1) |
-| `arc_cw` | `x`, `y`, `z`, `i`, `j`, `f` | Clockwise arc (G2). `i`/`j` are center offsets from start. |
-| `arc_ccw` | `x`, `y`, `z`, `i`, `j`, `f` | Counter-clockwise arc (G3) |
+| `cycle_drill` | `depth`, `surface_position`, `plunge_depth`, `feed`, `dwell_top`, `dwell_bottom`, `clearance`, `second_clearance`, `tip_trough` | Canned drill cycle. All fields are numbers except `tip_trough` (boolean). Defined in the IR but not yet emitted by any operation. |
+| `arc_cw` | `x`, `y`, `z`, `i`, `j`, `feed` | Clockwise arc (G2). `i`/`j` are center offsets from start. |
+| `arc_ccw` | `x`, `y`, `z`, `i`, `j`, `feed` | Counter-clockwise arc (G3). |
 | `coolant_on` | `mode` (`"flood"`, `"mist"`, `"through_tool"`) | Coolant on |
 | `coolant_off` | *(none)* | Coolant off |
 | `dwell` | `p` (seconds) | Dwell / pause (G4) |
@@ -136,7 +163,7 @@ These block types are defined in the design but not yet emitted. They will arriv
 | `comp_right` | `d` (offset register number) | Cutter compensation right (G42) |
 | `comp_off` | *(none)* | Cancel cutter compensation (G40) |
 | `optional_stop` | *(none)* | Optional stop (M1) |
-| `cycle_define` | `cycle_type`, `z`, `r`, `f`, `q` (nil if N/A), `pitch` (nil if N/A) | Define a canned cycle. Only sent if your PP declares the cycle type in `supported_cycles`. |
+| `cycle_define` | `cycle_type`, `z`, `r`, `feed`, `q` (nil if N/A), `pitch` (nil if N/A) | Define a canned cycle. Only sent if your PP declares the cycle type in `capabilities.cycles`. |
 | `cycle_call` | `x`, `y` | Execute the active cycle at this position |
 | `cycle_off` | *(none)* | Cancel the active cycle |
 | `optional_skip_start` | `skip_level` (1-9), `label`, `operation_name` | Begin skippable section |
@@ -186,7 +213,7 @@ That's the only helper currently available. The Heidenhain PP defines its own `h
 
 ### Handling Nil Coordinates
 
-The compiler omits coordinates that haven't changed. Always guard:
+Currently all coordinates on `rapid` and `linear` blocks are always present (non-nil). When arc blocks are added, some axes may be omitted if unchanged. Guard defensively for future compatibility:
 
 ```lua
 local function coords(block)
@@ -234,14 +261,26 @@ Some controllers merge what the IR represents as separate blocks. Heidenhain mer
 Approaches:
 
 - **Buffer and emit later**: When you see `spindle_on`, store the M-code and append it to the next motion line.
-- **Return empty string**: The current Heidenhain PP returns `""` for `spindle_on`/`spindle_off` as a placeholder. This works but means the spindle command is silently dropped — to be fixed as the PP matures.
+- **Emit a standalone line**: The current Heidenhain PP emits `"L M3"` for `spindle_on` and `"L M5"` for `spindle_off` as standalone lines. This is a placeholder — ideally these would be appended to the adjacent motion line (`L X+... FMAX M3`), which is the idiomatic Heidenhain form.
 
-### Canned Cycles (Future)
+### Canned Cycles
 
-When your PP declares `supported_cycles`, the compiler sends `cycle_define` instead of explicit drill moves. Map cycle types to your controller's native syntax:
+**Current:** The compiler emits a single `cycle_drill` block per drill operation. It bundles the cycle definition and position list together. Map it to your controller's drill cycle:
 
 ```lua
--- G-code example
+if block.type == "cycle_drill" then
+    -- G-code example
+    return string.format("G81 Z%.3f R%.3f F%.0f",
+        block.depth, block.surface_position, block.feed)
+end
+```
+
+**Planned:** Split into `cycle_define` / `cycle_call` / `cycle_off` to allow one definition followed by individual position calls. When that lands, declare support to opt in:
+
+```lua
+M.capabilities = { cycles = { drilling = {}, peck_drill = {} } }
+
+-- Then in generate():
 if block.type == "cycle_define" then
     if block.cycle_type == "peck_drill" then
         return string.format("G83 Z%.3f R%.3f Q%.3f F%.0f",
@@ -254,7 +293,7 @@ elseif block.type == "cycle_off" then
 end
 ```
 
-If your controller doesn't support cycles, don't declare `supported_cycles` — the compiler falls back to explicit rapid/linear moves automatically.
+If your controller doesn't support cycles, omit `capabilities` — the compiler will fall back to explicit rapid/linear moves.
 
 ### Optional Operations (Future)
 
@@ -304,7 +343,7 @@ chipmunk tests/fixtures/drill.yaml --postprocessor mycontroller | diff expected.
 chipmunk tests/fixtures/drill.yaml
 ```
 
-The test fixtures in `tests/fixtures/` are minimal YAML files you can use as input. See `tests/fixtures/drill.yaml` for a manual drill example with three points.
+The test fixtures in `tests/fixtures/` are minimal YAML files you can use as input. See `tests/fixtures/drill.yaml` for a three-point `quill` operation example (manual positioning, no power feed).
 
 ---
 
