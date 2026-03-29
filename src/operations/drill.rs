@@ -1,4 +1,3 @@
-
 use crate::{
     core::toolpath::{Locations, MoveType, ToolpathSegment},
     nc::ir::NCBlock,
@@ -39,16 +38,12 @@ impl OperationType for Drill {
         segments: &[ToolpathSegment],
     ) -> Result<Vec<NCBlock>> {
         let mut blocks: Vec<NCBlock> = vec![
-            // ! No toolchange when manual drilling as it might change the coordinate
-            // NCBlock::ToolChange {
-            //     tool_number: Some(common.tool.tool_number),
-            //     spindle_speed: common.tool.spindle_speed,
-            // },
-            NCBlock::OperationStart { text: None },
-            NCBlock::Stop,
-            NCBlock::Comment {
-                text: String::from("ENABLE SINGLE BLOCK MODE FOR QUILL DRILLING"),
+            // TODO: Use the correct tool parameters
+            NCBlock::ToolChange {
+                tool_number: Some(common.tool.tool_number),
+                spindle_speed: common.tool.spindle_speed,
             },
+            NCBlock::OperationStart { text: None },
             NCBlock::SpindleOn {
                 direction: common.tool.spindle_direction,
             },
@@ -56,12 +51,24 @@ impl OperationType for Drill {
                 height: common.clearance,
             },
         ];
+        blocks.push(NCBlock::CycleDrill {
+            depth: 20.0,
+            surface_position: 0.0,
+            plunge_depth: 0.0,
+            feed: 100.0,
+            dwell_top: 0.0,
+            dwell_bottom: 0.0,
+            clearance: 5.0,
+            second_clearance: 20.0,
+            tip_trough: false,
+        });
         for segment in segments {
             blocks.push(NCBlock::Rapid {
                 x: segment.x,
                 y: segment.y,
                 z: common.clearance,
             });
+            blocks.push(NCBlock::CycleCall)
         }
         blocks.push(NCBlock::Retract {
             height: common.clearance,

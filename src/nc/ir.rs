@@ -52,4 +52,5 @@ pub enum NCBlock {
         second_clearance: f64,
         tip_trough: bool,
     },
+    CycleCall,
 }

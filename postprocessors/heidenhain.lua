@@ -31,17 +31,25 @@ function M.generate(blocks, context)
 
 	-- NC Blocks
 	for _, block in ipairs(blocks) do
+		-- First, check for blocks that are important context for other lines (e.g. modal commands, spindle on)
+
 		-- match all blocks and append to lines
+		-- TODO: Some blocks return a table which needs to be concatenated
+		-- this is intended behaviour as a cycle def should not increment the line number.
 		local line = M.format_block(block)
 		if line then
-			lines[#lines + 1] = #lines .. " " .. line
+			if type(line) == "table" then
+				-- Concatenate the lines with ~ and newline, only the first line gets a line number
+				lines[#lines + 1] = #lines .. " " .. table.concat(line, "~\n")
+			else
+				lines[#lines + 1] = #lines .. " " .. line
+			end
 		else
 			return nil, "unimplemented block: " .. block.type
 		end
 	end
 
 	-- Postamble
-	-- TODO: Add M30?
 	lines[#lines + 1] = #lines .. " M30"
 	lines[#lines + 1] = #lines .. " END PGM " .. context.name .. " " .. string.upper(context.units)
 
@@ -54,6 +62,9 @@ end
 -- > Q: What about retroactive commands? Do some commands need to edit program history?
 -- TODO: Maybe send the current context to format_block? e.g. previous position to omit unchanged coordinates?
 function M.format_block(block)
+	--------------------------------------------------------------------------------
+	-- Standard blocks
+	--------------------------------------------------------------------------------
 	if block.type == "operation_start" then
 		return ""
 	elseif block.type == "operation_end" then
@@ -75,7 +86,7 @@ function M.format_block(block)
 		-- For now, we stop the spindle with a dummy line
 		return "L M5"
 	elseif block.type == "retract" then
-		return "L " .. M.hh_coord("Z", block.height) .. " FMAX"
+		return "L " .. M.hh_ax_coord("Z", block.height) .. " FMAX"
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
 		return "L Z+0 R0 FMAX M92"
@@ -84,7 +95,16 @@ function M.format_block(block)
 		return "L Z+0 R0 FMAX M92\nL X+0 Y+0 R0 FMAX M92"
 	elseif block.type == "rapid" then
 		return "L " .. M.format_coords(block) .. " FMAX"
+
+	--------------------------------------------------------------------------------
+	-- Cycles
+	--------------------------------------------------------------------------------
+	elseif block.type == "cycle_call" then
+		return "L CYCLE CALL"
+	elseif block.type == "cycle_drill" then
+		return M.CYCLE200(block)
 	end
+
 	-- Unknown block
 	return nil
 end
@@ -92,29 +112,47 @@ end
 function M.CYCLE200(block)
 	local cycle = {}
 	cycle[#cycle + 1] = "CYCL DEF 200 DRILLING"
-	cycle[#cycle + 1] = "   Q200=" .. block.set_up_clearance .. ";SET-UP CLEARANCE"
-	return table.concat(cycle, " ~\n")
+	cycle[#cycle + 1] = "   Q200=" .. M.cycle_coord(block.clearance) .. ";SET-UP CLEARANCE"
+	cycle[#cycle + 1] = "   Q201=" .. M.cycle_coord(block.depth) .. ";DEPTH"
+	cycle[#cycle + 1] = "   Q206=" .. M.cycle_coord(block.feed) .. ";FEED RATE FOR PLNGNG"
+	cycle[#cycle + 1] = "   Q202=" .. M.cycle_coord(block.plunge_depth) .. ";PLUNGING DEPTH"
+	cycle[#cycle + 1] = "   Q210=" .. M.cycle_coord(block.dwell_top) .. ";DWELL TIME AT TOP"
+	cycle[#cycle + 1] = "   Q203=" .. M.cycle_coord(block.surface_position) .. ";SURFACE COORDINATE"
+	cycle[#cycle + 1] = "   Q204=" .. M.cycle_coord(block.second_clearance) .. ";2ND SET-UP CLEARANCE"
+	cycle[#cycle + 1] = "   Q211=" .. M.cycle_coord(block.dwell_bottom) .. ";DWELL TIME AT DEPTH"
+	cycle[#cycle + 1] = "   Q395=" .. M.cycle_coord(block.tip_trough and 1 or 0) .. ";DEPTH REFERENCE"
+	return cycle
 end
 
 -- Helper functions
 
 function M.format_coords(block)
 	local lines = {}
+	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes
 	if block.x then
-		lines[#lines + 1] = M.hh_coord("X", block.x)
+		lines[#lines + 1] = M.hh_ax_coord("X", block.x)
 	end
 	if block.y then
-		lines[#lines + 1] = M.hh_coord("Y", block.y)
+		lines[#lines + 1] = M.hh_ax_coord("Y", block.y)
 	end
 	if block.z then
-		lines[#lines + 1] = M.hh_coord("Z", block.z)
+		lines[#lines + 1] = M.hh_ax_coord("Z", block.z)
 	end
 	return table.concat(lines, " ")
 end
 
-function M.hh_coord(axis, value)
-	local sign = value >= 0 and "+" or ""
-	return axis .. sign .. Fmt(value, 3)
+function M.hh_ax_coord(axis, value)
+	return axis .. M.hh_coord(value)
+end
+
+function M.hh_coord(value)
+	local sign = value >= 0 and "+" or "-"
+	return sign .. Fmt(value, 3)
+end
+
+function M.cycle_coord(value)
+	local sign = value >= 0 and "+" or "-"
+	return sign .. string.format("%-15s", value)
 end
 
 return M
