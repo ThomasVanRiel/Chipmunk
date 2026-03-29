@@ -41,6 +41,7 @@ pub enum NCBlock {
     SpindleOff,
 
     // Canned Cycles
+    CycleCall,
     CycleDrill {
         depth: f64,
         surface_position: f64,
@@ -52,5 +53,4 @@ pub enum NCBlock {
         second_clearance: f64,
         tip_trough: bool,
     },
-    CycleCall,
 }

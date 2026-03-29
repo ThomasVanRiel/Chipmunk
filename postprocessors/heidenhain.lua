@@ -11,7 +11,7 @@ M.file_extension = ".h"
 
 -- Indicate what canned cycles are supported by this postprocessor
 -- Omit or return empty table if none are supported
-M.capabilities = { cycles = { drilling = {} } }
+M.capabilities = { cycles = { drill = {} } }
 
 -- This function is called by Chipmunk with the list of IR blocks
 -- blocks: array of block tables (see IR documentation)
@@ -86,7 +86,7 @@ function M.format_block(block)
 		-- For now, we stop the spindle with a dummy line
 		return "L M5"
 	elseif block.type == "retract" then
-		return "L " .. M.hh_ax_coord("Z", block.height) .. " FMAX"
+		return "L " .. M.ax_coord("Z", block.height) .. " FMAX"
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
 		return "L Z+0 R0 FMAX M92"
@@ -130,22 +130,22 @@ function M.format_coords(block)
 	local lines = {}
 	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes
 	if block.x then
-		lines[#lines + 1] = M.hh_ax_coord("X", block.x)
+		lines[#lines + 1] = M.ax_coord("X", block.x)
 	end
 	if block.y then
-		lines[#lines + 1] = M.hh_ax_coord("Y", block.y)
+		lines[#lines + 1] = M.ax_coord("Y", block.y)
 	end
 	if block.z then
-		lines[#lines + 1] = M.hh_ax_coord("Z", block.z)
+		lines[#lines + 1] = M.ax_coord("Z", block.z)
 	end
 	return table.concat(lines, " ")
 end
 
-function M.hh_ax_coord(axis, value)
-	return axis .. M.hh_coord(value)
+function M.ax_coord(axis, value)
+	return axis .. M.coord(value)
 end
 
-function M.hh_coord(value)
+function M.coord(value)
 	local sign = value >= 0 and "+" or "-"
 	return sign .. Fmt(value, 3)
 end
