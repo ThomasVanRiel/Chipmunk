@@ -1,21 +1,19 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::core::tool::SpindleDirection;
+use crate::core::tool::SpindleState;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NCState {
-    spindle_on: bool,
-    spindle_direction: SpindleDirection,
-    coolant_on: bool,
+    spindle: SpindleState,
+    coolant: bool,
 }
 
 impl Default for NCState {
     fn default() -> Self {
         NCState {
-            spindle_on: false,
-            spindle_direction: SpindleDirection::Cw,
-            coolant_on: false,
+            spindle: SpindleState::Off,
+            coolant: false,
         }
     }
 }
@@ -38,8 +36,11 @@ pub enum NCBlock {
     },
     Stop,
     SpindleOn {
-        direction: SpindleDirection,
+        direction: SpindleState,
     },
+    SpindleOff,
+    CoolantOn,
+    CoolantOff,
     Retract {
         height: f64,
     },
@@ -56,7 +57,6 @@ pub enum NCBlock {
         z: f64,
         feed: f64,
     },
-    SpindleOff,
 
     // Canned Cycles
     CycleCall {
@@ -90,11 +90,16 @@ pub fn annotate_blocks<'a>(blocks: &'a [NCBlock]) -> Result<Vec<AnnotatedBlock<'
         .map(|block| {
             match block {
                 NCBlock::SpindleOn { direction } => {
-                    state.spindle_on = true;
-                    state.spindle_direction = *direction;
+                    state.spindle = *direction;
                 }
                 NCBlock::SpindleOff => {
-                    state.spindle_on = false;
+                    state.spindle = SpindleState::Off;
+                }
+                NCBlock::CoolantOn => {
+                    state.coolant = true;
+                }
+                NCBlock::CoolantOff => {
+                    state.coolant = false;
                 }
                 _ => {}
             }

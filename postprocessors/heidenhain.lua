@@ -5,6 +5,10 @@ local Fmt = base.Fmt
 -- Define module to return formatted NC code to Chipmunk
 local M = {}
 
+-- Prepare module variables to store states
+M.spindle_state = "off"
+M.coolant_state = false
+
 -- Set postprocessor information fields
 M.name = "Heidenhain"
 M.file_extension = ".h"
@@ -62,7 +66,9 @@ function M.format_block(block)
 	if block.type == "operation_start" then
 		local lines = { " " }
 		if block.text then
-			lines[#lines + 1] = "; " .. block.text
+			-- Use structure blocks prefixed with `*` to label the operation.
+			-- I think these lines should not have a line number.
+			lines[#lines + 1] = "* " .. block.text
 		end
 		return lines
 	elseif block.type == "operation_end" then
@@ -70,33 +76,35 @@ function M.format_block(block)
 	elseif block.type == "tool_change" then
 		return { "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed }
 	elseif block.type == "comment" then
-		-- `* <comment>` is also a valid comment block, when to use what comment type?
 		return { "; " .. block.text }
 	elseif block.type == "stop" then
 		return { "M0" }
 	elseif block.type == "spindle_on" then
-		-- TODO: tricky block as it is merged with the next rapid
-		-- > Q: But what if there is no rapid programmed before the next cut?
-		-- > A: For now, we activate the spindle with a dummy line
-		return { "L M3" }
+		-- Should be handled by rapid and retract moves based on block.state.spindle and M.spindle_state
+		return {}
 	elseif block.type == "spindle_off" then
-		-- TODO: tricky block as it is merged with the next (or previous in some cases) rapid
-		-- For now, we stop the spindle with a dummy line
-		return { "L M5" }
+		-- Should be handled by rapid and retract moves based on block.state.spindle and M.spindle_state
+		return {}
+	elseif block.type == "coolant_on" then
+		-- Should be handled by rapid and retract moves based on block.state.coolant and M.coolant_state
+		return {}
+	elseif block.type == "coolant_off" then
+		-- Should be handled by rapid and retract moves based on block.state.coolant and M.coolant_state
+		return {}
 
 	------------------------------------------------------------------------------
 	-- Moves
 	------------------------------------------------------------------------------
 	elseif block.type == "retract" then
-		return { "L " .. M.ax_coord("Z", block.height) .. " FMAX" }
+		return { "L " .. M.ax_coord("Z", block.height) .. " FMAX" .. M.spindle_postfix(block.state) }
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
-		return { "L Z+0 R0 FMAX M92" }
+		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state) }
 	elseif block.type == "home" then
 		-- Retract in machine coordinates first, then home in the plane
-		return { "L Z+0 R0 FMAX M92", "L X+0 Y+0 R0 FMAX M92" }
+		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state), "L X+0 Y+0 R0 FMAX M92" }
 	elseif block.type == "rapid" then
-		return { "L " .. M.format_coords(block) .. " FMAX" }
+		return { "L " .. M.format_coords(block) .. " FMAX" .. M.spindle_postfix(block.state) }
 
 	------------------------------------------------------------------------------
 	-- Cycles
@@ -130,6 +138,41 @@ end
 --------------------------------------------------------------------------------
 -- Helper functions
 --------------------------------------------------------------------------------
+-- TODO: Also integrate cooling in this function. Coolant on M8, off M9, spindle cw & coolant on M13, ccw M14
+function M.spindle_postfix(state)
+	local postfix = ""
+	-- Check if the stored spindlestate should be updated
+	if state.spindle ~= M.spindle_state then
+		if state.spindle == "cw" then
+			postfix = " M3"
+		elseif state.spindle == "ccw" then
+			postfix = " M4"
+		else
+			postfix = " M5"
+		end
+		M.spindle_state = state.spindle
+	end
+
+	-- Check if the stored coolantstate should be updated
+	if state.coolant ~= M.coolant_state then
+		if state.coolant then
+			-- Coolant ON
+			if postfix == "" then
+				postfix = " M8"
+			elseif postfix == " M3" then
+				postfix = " M13"
+			elseif postfix == " M4" then
+				postfix = " M14"
+			end
+		else
+			-- Coolant OFF
+			postfix = postfix .. " M9"
+		end
+		M.coolant_state = state.coolant
+	end
+	return postfix
+end
+
 function M.format_coords(block)
 	local lines = {}
 	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes

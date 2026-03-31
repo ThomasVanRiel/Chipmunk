@@ -26,8 +26,8 @@ Implementation:
 
 `ToolChange` Parameters:
 
-- `tool_number`: Optional u32, tool number in the magazine
-- `spindle_speed`: f64, RPM
+- `tool_number`: Optional integer, tool number in the magazine
+- `spindle_speed`: float, RPM
 
 Implementation:
 
@@ -75,9 +75,9 @@ Implementation:
 
 `Rapid` Parameters:
 
-- `x`: f64, X coordinate
-- `y`: f64, Y coordinate
-- `z`: f64, Z coordinate
+- `x`: float, X coordinate
+- `y`: float, Y coordinate
+- `z`: float, Z coordinate
 
 Implementation:
 
@@ -87,10 +87,10 @@ Implementation:
 
 `Linear` Parameters:
 
-- `x`: f64, X coordinate
-- `y`: f64, Y coordinate
-- `z`: f64, Z coordinate
-- `feed`: f64, feed rate
+- `x`: float, X coordinate
+- `y`: float, Y coordinate
+- `z`: float, Z coordinate
+- `feed`: float, feed rate
 
 Implementation:
 
@@ -100,7 +100,7 @@ Implementation:
 
 `Retract` Parameters:
 
-- `height`: f64, Z height to retract to (in WCS)
+- `height`: float, Z height to retract to (in WCS)
 
 Implementation:
 
@@ -128,9 +128,9 @@ Implementation:
 
 `CycleCall` Parameters:
 
-- `x`: f64, X position
-- `y`: f64, Y position
-- `z`: f64, Z position
+- `x`: float, X position
+- `y`: float, Y position
+- `z`: float, Z position
 
 Implementation:
 
@@ -140,14 +140,14 @@ Implementation:
 
 `CycleDrill` Parameters:
 
-- `depth`: f64, total drilling depth
-- `surface_position`: f64, Z coordinate of the surface
-- `plunge_depth`: f64, depth per peck
-- `feed`: f64, plunge feed rate
-- `dwell_top`: f64, dwell time at top (seconds)
-- `dwell_bottom`: f64, dwell time at depth (seconds)
-- `clearance`: f64, set-up clearance above surface
-- `second_clearance`: f64, second set-up clearance (retract height between pecks)
+- `depth`: float, total drilling depth
+- `surface_position`: float, Z coordinate of the surface
+- `plunge_depth`: float, depth per peck
+- `feed`: float, plunge feed rate
+- `dwell_top`: float, dwell time at top (seconds)
+- `dwell_bottom`: float, dwell time at depth (seconds)
+- `clearance`: float, set-up clearance above surface
+- `second_clearance`: float, second set-up clearance (retract height between pecks)
 - `tip_trough`: bool, depth measured to tip (true) or trough (false)
 
 Implementation:

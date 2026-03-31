@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum SpindleDirection {
+pub enum SpindleState {
+    Off,
     Cw,
     Ccw,
 }
@@ -13,7 +14,7 @@ pub struct Tool {
     pub name: String,
     pub diameter: f64,
     pub spindle_speed: f64,
-    pub spindle_direction: SpindleDirection,
+    pub spindle_direction: SpindleState,
 }
 
 impl Default for Tool {
@@ -23,7 +24,7 @@ impl Default for Tool {
             name: "Unnamed Tool".to_string(),
             diameter: 0.0,
             spindle_speed: 400.0,
-            spindle_direction: SpindleDirection::Cw,
+            spindle_direction: SpindleState::Cw,
         }
     }
 }

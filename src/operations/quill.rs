@@ -19,6 +19,7 @@ impl OperationType for Quill {
                     x: *x,
                     y: *y,
                     z: common.clearance,
+                    comment: None,
                 })
                 .collect::<Vec<_>>()),
             Locations::Pattern { pattern } => {
@@ -32,6 +33,7 @@ impl OperationType for Quill {
                         x: *x,
                         y: *y,
                         z: common.clearance,
+                        comment: None,
                     })
                     .collect::<Vec<_>>())
             }
@@ -64,17 +66,21 @@ impl OperationType for Quill {
             },
         ];
         for segment in segments {
+            if let Some(text) = &segment.comment {
+                blocks.push(NCBlock::Comment { text: text.clone() });
+            }
             blocks.push(NCBlock::Rapid {
                 x: segment.x,
                 y: segment.y,
                 z: common.clearance,
             });
         }
+        blocks.push(NCBlock::SpindleOff);
         blocks.push(NCBlock::Retract {
             height: common.clearance,
         });
         blocks.push(NCBlock::OperationEnd { text: None });
-        // SpindleOff optional, program end automatically stops spindle.
+        // SpindleOff optional, program end should automatically stop spindle.
         // blocks.push(NCBlock::SpindleOff);
         Ok(blocks)
     }

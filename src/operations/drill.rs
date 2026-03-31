@@ -19,6 +19,7 @@ impl OperationType for Drill {
                     x: *x,
                     y: *y,
                     z: common.clearance,
+                    comment: None,
                 })
                 .collect::<Vec<_>>()),
             Locations::Pattern { pattern } => {
@@ -44,6 +45,7 @@ impl OperationType for Drill {
                 spindle_speed: common.tool.spindle_speed,
             },
             NCBlock::OperationStart { text: None },
+            NCBlock::CoolantOn,
             NCBlock::SpindleOn {
                 direction: common.tool.spindle_direction,
             },
@@ -66,6 +68,9 @@ impl OperationType for Drill {
                 tip_trough: false,
             });
             for segment in segments {
+                if let Some(text) = &segment.comment {
+                    blocks.push(NCBlock::Comment { text: text.clone() });
+                }
                 blocks.push(NCBlock::CycleCall {
                     x: segment.x,
                     y: segment.y,
@@ -78,6 +83,8 @@ impl OperationType for Drill {
             // Actually, we need to know the capabilities already during generation,
             // where tool paths segments are generated. (At least in milling ...)
         };
+        blocks.push(NCBlock::SpindleOff);
+        blocks.push(NCBlock::CoolantOff);
         blocks.push(NCBlock::Retract {
             height: common.clearance,
         });
