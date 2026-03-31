@@ -6,8 +6,9 @@ local Fmt = base.Fmt
 local M = {}
 
 -- Prepare module variables to store states
-M.spindle_state = "off"
-M.coolant_state = false
+M.spindle_state = "off" -- Spindle starts in off state
+M.coolant_state = false -- Coolant starts in off state
+M.feed_state = -1 -- -1 means uninitialized, 0 means "FMAX", positive values mean linear feed rate (e.g. "F100")
 
 -- Set postprocessor information fields
 M.name = "Heidenhain"
@@ -29,8 +30,8 @@ M.capabilities = { cycles = { drill = {} } }
 ---Error content is free form, no structure is imposed
 ---@param blocks any
 ---@param context any
----@overload fun(blocks: any, context: any): string
----@overload fun(blocks: any, context: any): nil, string
+---@return string? result
+---@return string? error
 function M.generate(blocks, context)
 	-- Prepare table to store all lines of the NC program
 	local lines = {}
@@ -39,12 +40,10 @@ function M.generate(blocks, context)
 	lines[#lines + 1] = "0 BEGIN PGM " .. context.name .. " " .. string.upper(context.units)
 	-- block form? Check context if stock is provided.
 
-	-- NC Blocks
+	-- NC Block processing
 	for _, block in ipairs(blocks) do
-		-- First, check for blocks that are important context for other lines (e.g. modal commands, spindle on)
-
 		-- Match all blocks and append to lines
-		-- `M.format_block` returns a table of lines, as some blocks are expanded into multiple lines.
+		-- `M.format_block(block)` returns a table of lines, as some blocks are expanded into multiple lines.
 		-- Every line in block_lines receives a line number, use `\n` if no line number is needed or permitted.
 		local block_lines = M.format_block(block)
 		if block_lines then
@@ -52,6 +51,8 @@ function M.generate(blocks, context)
 				lines[#lines + 1] = #lines .. " " .. line
 			end
 		else
+			-- If M.format_block returns nil, let Chipmunk know the block was not implemented.
+			-- (Or ignore the unimplemented block, I'm not a cop)
 			return nil, "unimplemented block: " .. block.type
 		end
 	end
@@ -103,7 +104,7 @@ function M.format_block(block)
 	-- Moves
 	------------------------------------------------------------------------------
 	elseif block.type == "retract" then
-		return { "L Z" .. M.coord(block.height) .. " FMAX" .. M.spindle_postfix(block.state) }
+		return { "L Z" .. M.coord(block.height) .. M.feed_word(0) .. M.spindle_postfix(block.state) }
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
 		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state) }
@@ -111,14 +112,25 @@ function M.format_block(block)
 		-- Retract in machine coordinates first, then home in the plane
 		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state), "L X+0 Y+0 R0 FMAX M92" }
 	elseif block.type == "rapid" then
-		return { "L " .. M.format_coords(block) .. " FMAX" .. M.spindle_postfix(block.state) }
+		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. M.spindle_postfix(block.state) }
+	elseif block.type == "linear" then
+		-- TODO: Check if feed rate was changed and update accordingly.
+		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
+	elseif block.type == "arccw" then
+		-- TODO: Check if feed rate was changed and update accordingly.
+		-- TODO: Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR- for clockwise paths
+		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
+	elseif block.type == "arcccw" then
+		-- TODO: Check if feed rate was changed and update accordingly.
+		-- TODO: Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR+ for counterclockwise paths
+		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
 
 	------------------------------------------------------------------------------
 	-- Cycles
 	------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
 		-- Or we can use separate lines `L X Y Z FMAX` and `CYCL CALL`
-		return { "L " .. M.format_coords(block) .. " FMAX M99" }
+		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. " M99" }
 	elseif block.type == "cycle_drill" then
 		return { table.concat(M.CYCLE200(block), "~\n") }
 	end
@@ -182,6 +194,23 @@ function M.spindle_postfix(state)
 	end
 
 	return postfix
+end
+
+---Check the programmed feed to the current state and produce the word if needed.
+---Asume the feed is the last word programmed in the line.
+---@param feed number
+---@return string
+function M.feed_word(feed)
+	local word = ""
+	if feed ~= M.feed_state then
+		if feed == 0 then
+			word = " FMAX"
+		else
+			word = " F" .. Fmt(feed, 0)
+		end
+		M.feed_state = feed
+	end
+	return word
 end
 
 ---Format coordinates based on axis presence in a IR block
