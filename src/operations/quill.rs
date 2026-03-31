@@ -49,7 +49,9 @@ impl OperationType for Quill {
             //     tool_number: Some(common.tool.tool_number),
             //     spindle_speed: common.tool.spindle_speed,
             // },
-            NCBlock::OperationStart { text: None },
+            NCBlock::OperationStart {
+                text: Some(common.name.clone()),
+            },
             NCBlock::Stop,
             NCBlock::Comment {
                 text: String::from("ENABLE SINGLE BLOCK MODE FOR QUILL DRILLING"),

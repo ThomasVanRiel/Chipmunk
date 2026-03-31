@@ -11,6 +11,8 @@ M.file_extension = ".h"
 
 -- Indicate what canned cycles are supported by this postprocessor
 -- Omit or return empty table if none are supported
+-- Chipmunk emits NC Cycle blocks if support is declared (see IR documentation)
+-- Make sure the cycles are handled correctly, e.g., `drill` expands to `CYCLE 200` in Heidenhain controllers
 M.capabilities = { cycles = { drill = {} } }
 
 -- This function is called by Chipmunk with the list of IR blocks
@@ -58,7 +60,11 @@ function M.format_block(block)
 	-- Standard blocks
 	------------------------------------------------------------------------------
 	if block.type == "operation_start" then
-		return { "" }
+		local lines = { " " }
+		if block.text then
+			lines[#lines + 1] = "; " .. block.text
+		end
+		return lines
 	elseif block.type == "operation_end" then
 		return { "" }
 	elseif block.type == "tool_change" then
