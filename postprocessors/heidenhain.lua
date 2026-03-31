@@ -36,6 +36,7 @@ function M.generate(blocks, context)
 		-- match all blocks and append to lines
 		-- TODO: Some blocks return a table which needs to be concatenated
 		-- this is intended behaviour as a cycle def should not increment the line number.
+		-- TODO: Should we add the line numbers in another pass?
 		local line = M.format_block(block)
 		if line then
 			if type(line) == "table" then
@@ -60,7 +61,7 @@ end
 -- We return nil anyway on unimplemented blocks.
 -- Returning a stack like object that is sent to all future blocks so they can check if they need to postfix commands.
 -- > Q: What about retroactive commands? Do some commands need to edit program history?
--- TODO: Maybe send the current context to format_block? e.g. previous position to omit unchanged coordinates?
+-- > A: A field keyed "state" is in block which contains the state of the machine, according to the compiler
 function M.format_block(block)
 	--------------------------------------------------------------------------------
 	-- Standard blocks
@@ -101,6 +102,8 @@ function M.format_block(block)
 		--------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
 		-- TODO: This block should be merged with the previous block with M99 instead of a separate line
+		-- A better solution is to include the position of the call in the NCBlock,
+		-- and let the postprocessor handle if it should be divided in multiple lines.
 		return "CYCL CALL"
 	elseif block.type == "cycle_drill" then
 		return M.CYCLE200(block)

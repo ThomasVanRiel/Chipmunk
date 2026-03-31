@@ -115,7 +115,21 @@ Pattern types (planned): `"circular"`, `"line"`, `"rect"`.
 
 ## IR Block Reference
 
-Every block passed to `generate()` is a Lua table with a `type` field (string) and type-specific parameters. Parameter values are numbers, strings, or booleans — no nested tables.
+Every block passed to `generate()` is a Lua table with a `type` field (string), type-specific parameters, and a `state` field containing the machine state active after this block takes effect.
+
+Parameter values are numbers, strings, or booleans. The `state` field is the only nested table.
+
+### State Field
+
+Every block carries a `state` table reflecting the machine state established by this block:
+
+| Field | Type | Description |
+|---|---|---|
+| `spindle_on` | boolean | Whether the spindle is running |
+| `spindle_direction` | `"cw"` or `"ccw"` | Spindle rotation direction |
+| `coolant_on` | boolean | Whether coolant is active |
+
+The state is post-transition: a `spindle_on` block carries `state.spindle_on = true`, and all subsequent blocks until `spindle_off` carry the same. Use this to annotate motion lines with the correct M-codes without tracking state manually in your post-processor.
 
 ### Design principles
 
@@ -258,10 +272,19 @@ Note: the current Heidenhain PP uses `#lines` as the line counter, which counts 
 
 Some controllers merge what the IR represents as separate blocks. Heidenhain merges spindle start with the next motion line (`L X... FMAX M3`), and cutter compensation with the move (`L X... RL`).
 
-Approaches:
+Use `block.state` to append M-codes to motion lines without buffering:
 
-- **Buffer and emit later**: When you see `spindle_on`, store the M-code and append it to the next motion line.
-- **Emit a standalone line**: The current Heidenhain PP emits `"L M3"` for `spindle_on` and `"L M5"` for `spindle_off` as standalone lines. This is a placeholder — ideally these would be appended to the adjacent motion line (`L X+... FMAX M3`), which is the idiomatic Heidenhain form.
+```lua
+if block.type == "rapid" or block.type == "linear" then
+    local suffix = ""
+    if block.state.spindle_on then
+        suffix = block.state.spindle_direction == "cw" and " M3" or " M4"
+    end
+    -- append suffix to the formatted line
+end
+```
+
+The `spindle_on` and `spindle_off` blocks are still present in the IR — your PP can emit them as standalone lines, merge them using `block.state`, or skip them entirely if the state field covers your needs.
 
 ### Canned Cycles
 

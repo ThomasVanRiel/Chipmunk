@@ -59,6 +59,8 @@ pub fn generate_nc(
     let blocks_table: Vec<LuaValue> = annotated_blocks
         .iter()
         .map(|block| {
+            // Add the state key to the lua table here because serde does not handle a key named
+            // "type" how we want during flattening.
             let block_val = lua.to_value_with(block.block, serialize_options)?;
             let state_val = lua.to_value_with(&block.state, serialize_options)?;
             if let (LuaValue::Table(block_table), _) = (&block_val, &state_val) {

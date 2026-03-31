@@ -3,7 +3,6 @@ use serde::Serialize;
 
 use crate::core::tool::SpindleDirection;
 
-// TODO: Add machine state to NCBlocks. Can we add a state struct that is automatically serialized?
 #[derive(Debug, Clone, Serialize)]
 pub struct NCState {
     spindle_on: bool,
