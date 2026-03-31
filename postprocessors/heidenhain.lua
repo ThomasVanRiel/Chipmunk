@@ -19,14 +19,18 @@ M.file_extension = ".h"
 -- Make sure the cycles are handled correctly, e.g., `drill` expands to `CYCLE 200` in Heidenhain controllers
 M.capabilities = { cycles = { drill = {} } }
 
--- This function is called by Chipmunk with the list of IR blocks
--- blocks: array of block tables (see IR documentation)
--- context: program conext table (see IR documentation)
--- Returns: NC code as single string on success
--- On error: return nil, "Descriptive error message"
--- Chipmunk prints the error message to stderr and exits with code 1
--- Use the error for machine specific validation (overtravel, unsupported cycles)
--- Error content is free form, no structure is imposed
+---This function is called by Chipmunk with the list of IR blocks
+---blocks: array of block tables (see IR documentation)
+---context: program conext table (see IR documentation)
+---Returns: NC code as single string on success
+---On error: return nil, "Descriptive error message"
+---Chipmunk prints the error message to stderr and exits with code 1
+---Use the error for machine specific validation (overtravel, unsupported cycles)
+---Error content is free form, no structure is imposed
+---@param blocks any
+---@param context any
+---@overload fun(blocks: any, context: any): string
+---@overload fun(blocks: any, context: any): nil, string
 function M.generate(blocks, context)
 	-- Prepare table to store all lines of the NC program
 	local lines = {}
@@ -59,6 +63,9 @@ function M.generate(blocks, context)
 	return table.concat(lines, "\n")
 end
 
+---Format Heidenhain lines based on IR block and state
+---@param block any
+---@return (table | nil)
 function M.format_block(block)
 	------------------------------------------------------------------------------
 	-- Standard blocks
@@ -96,7 +103,7 @@ function M.format_block(block)
 	-- Moves
 	------------------------------------------------------------------------------
 	elseif block.type == "retract" then
-		return { "L " .. M.ax_coord("Z", block.height) .. " FMAX" .. M.spindle_postfix(block.state) }
+		return { "L Z" .. M.coord(block.height) .. " FMAX" .. M.spindle_postfix(block.state) }
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
 		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state) }
@@ -110,7 +117,7 @@ function M.format_block(block)
 	-- Cycles
 	------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
-		-- Or we can use lines `L X Y Z FMAX` and `CYCL CALL`
+		-- Or we can use separate lines `L X Y Z FMAX` and `CYCL CALL`
 		return { "L " .. M.format_coords(block) .. " FMAX M99" }
 	elseif block.type == "cycle_drill" then
 		return { table.concat(M.CYCLE200(block), "~\n") }
@@ -138,7 +145,10 @@ end
 --------------------------------------------------------------------------------
 -- Helper functions
 --------------------------------------------------------------------------------
--- TODO: Also integrate cooling in this function. Coolant on M8, off M9, spindle cw & coolant on M13, ccw M14
+
+---Compile the spindle and coolant commands into their respective variants
+---@param state any
+---@return string
 function M.spindle_postfix(state)
 	local postfix = ""
 	-- Check if the stored spindlestate should be updated
@@ -170,36 +180,43 @@ function M.spindle_postfix(state)
 		end
 		M.coolant_state = state.coolant
 	end
+
 	return postfix
 end
 
+---Format coordinates based on axis presence in a IR block
+---@param block any
+---@return string
 function M.format_coords(block)
 	local lines = {}
 	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes
 	if block.x then
-		lines[#lines + 1] = M.ax_coord("X", block.x)
+		lines[#lines + 1] = "X" .. M.coord(block.x)
 	end
 	if block.y then
-		lines[#lines + 1] = M.ax_coord("Y", block.y)
+		lines[#lines + 1] = "Y" .. M.coord(block.y)
 	end
 	if block.z then
-		lines[#lines + 1] = M.ax_coord("Z", block.z)
+		lines[#lines + 1] = "Z" .. M.coord(block.z)
 	end
 	return table.concat(lines, " ")
 end
 
-function M.ax_coord(axis, value)
-	return axis .. M.coord(value)
-end
-
+---Format coordinates to always contain the sign
+---@param value number
+---@return unknown
 function M.coord(value)
 	local sign = value >= 0 and "+" or "-"
 	return sign .. Fmt(value, 3)
 end
 
+---Format numbers in cycles to be fixed width
+---@param value number
+---@return string
 function M.cycle_coord(value)
 	local sign = value >= 0 and "+" or "-"
 	return sign .. string.format("%-15s", value)
 end
 
+-- Return the module containing this postprocessor to Chipmunk
 return M

@@ -1,0 +1,5 @@
+{
+  "runtime.path": [
+    "postprocessors/?.lua"
+  ]
+}
