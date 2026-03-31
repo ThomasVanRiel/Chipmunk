@@ -101,10 +101,8 @@ function M.format_block(block)
 		-- Cycles
 		--------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
-		-- TODO: This block should be merged with the previous block with M99 instead of a separate line
-		-- A better solution is to include the position of the call in the NCBlock,
-		-- and let the postprocessor handle if it should be divided in multiple lines.
-		return "CYCL CALL"
+		-- Or we can use line `CYCL CALL`
+		return "L " .. M.format_coords(block) .. " FMAX M99"
 	elseif block.type == "cycle_drill" then
 		return M.CYCLE200(block)
 	end

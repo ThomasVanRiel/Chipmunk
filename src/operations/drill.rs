@@ -66,12 +66,11 @@ impl OperationType for Drill {
                 tip_trough: false,
             });
             for segment in segments {
-                blocks.push(NCBlock::Rapid {
+                blocks.push(NCBlock::CycleCall {
                     x: segment.x,
                     y: segment.y,
                     z: common.clearance,
                 });
-                blocks.push(NCBlock::CycleCall)
             }
         } else {
             // TODO: Calculate tool paths based on the segments.
