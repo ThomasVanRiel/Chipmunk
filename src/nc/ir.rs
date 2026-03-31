@@ -1,7 +1,25 @@
+use anyhow::Result;
 use serde::Serialize;
 
 use crate::core::tool::SpindleDirection;
 
+// TODO: Add machine state to NCBlocks. Can we add a state struct that is automatically serialized?
+#[derive(Debug, Clone, Serialize)]
+pub struct NCState {
+    spindle_on: bool,
+    spindle_direction: SpindleDirection,
+    coolant_on: bool,
+}
+
+impl Default for NCState {
+    fn default() -> Self {
+        NCState {
+            spindle_on: false,
+            spindle_direction: SpindleDirection::Cw,
+            coolant_on: false,
+        }
+    }
+}
 // NCBlocks are serializeable to lua tables using `lua.to_value(block)`
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -53,4 +71,35 @@ pub enum NCBlock {
         second_clearance: f64,
         tip_trough: bool,
     },
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnnotatedBlock<'a> {
+    pub block: &'a NCBlock,
+    pub state: NCState,
+}
+
+pub fn annotate_blocks<'a>(blocks: &'a [NCBlock]) -> Result<Vec<AnnotatedBlock<'a>>> {
+    let mut state = NCState::default();
+    let annotated_blocks: Vec<AnnotatedBlock> = blocks
+        .iter()
+        .map(|block| {
+            match block {
+                NCBlock::SpindleOn { direction } => {
+                    state.spindle_on = true;
+                    state.spindle_direction = *direction;
+                }
+                NCBlock::SpindleOff => {
+                    state.spindle_on = false;
+                }
+                _ => {}
+            }
+            AnnotatedBlock {
+                state: state.clone(),
+                block,
+            }
+        })
+        .collect();
+
+    Ok(annotated_blocks)
 }

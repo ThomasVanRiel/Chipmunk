@@ -52,6 +52,7 @@ impl OperationType for Drill {
             },
         ];
         // TODO: Check if CycleDrill is supported by the postprocessor
+        // TODO: Populate fields from config
         if common.capabilities.cycles.contains_key("drill") {
             blocks.push(NCBlock::CycleDrill {
                 depth: 20.0,
@@ -72,6 +73,9 @@ impl OperationType for Drill {
                 });
                 blocks.push(NCBlock::CycleCall)
             }
+        } else {
+            // TODO: Calculate tool paths based on the segments.
+            // Rapid to clearance, linear blocks plunge_depth down.
         };
         blocks.push(NCBlock::Retract {
             height: common.clearance,

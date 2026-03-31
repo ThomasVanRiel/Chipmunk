@@ -96,11 +96,12 @@ function M.format_block(block)
 	elseif block.type == "rapid" then
 		return "L " .. M.format_coords(block) .. " FMAX"
 
-	--------------------------------------------------------------------------------
-	-- Cycles
-	--------------------------------------------------------------------------------
+		--------------------------------------------------------------------------------
+		-- Cycles
+		--------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
-		return "L CYCLE CALL"
+		-- TODO: This block should be merged with the previous block with M99 instead of a separate line
+		return "CYCL CALL"
 	elseif block.type == "cycle_drill" then
 		return M.CYCLE200(block)
 	end

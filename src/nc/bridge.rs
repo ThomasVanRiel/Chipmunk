@@ -1,5 +1,5 @@
 use super::ir::NCBlock;
-use crate::core::postprocessors::PostprocessorCapabilities;
+use crate::{core::postprocessors::PostprocessorCapabilities, nc::ir::annotate_blocks};
 use mlua::prelude::*;
 
 const BASE_LUA: &str = include_str!("../../postprocessors/base.lua");
@@ -55,9 +55,17 @@ pub fn generate_nc(
     context.set("units", units)?;
 
     // Convert the blocks to lua table
-    let blocks_table: Vec<LuaValue> = blocks
+    let annotated_blocks = annotate_blocks(blocks)?;
+    let blocks_table: Vec<LuaValue> = annotated_blocks
         .iter()
-        .map(|block| lua.to_value_with(block, serialize_options))
+        .map(|block| {
+            let block_val = lua.to_value_with(block.block, serialize_options)?;
+            let state_val = lua.to_value_with(&block.state, serialize_options)?;
+            if let (LuaValue::Table(block_table), _) = (&block_val, &state_val) {
+                block_table.set("state", state_val)?;
+            }
+            Ok(block_val)
+        })
         .collect::<LuaResult<Vec<LuaValue>>>()?;
 
     // Call the generate function of the postprocessor to return the NC program

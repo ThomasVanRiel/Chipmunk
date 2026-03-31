@@ -1,9 +1,9 @@
 use crate::{
-    core::toolpath::{Locations, MoveType, Pattern, ToolpathSegment},
+    core::toolpath::{Locations, MoveType, ToolpathSegment},
     nc::ir::NCBlock,
     operations::{OperationCommon, OperationType},
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 pub struct Quill {
     pub locations: Locations,
