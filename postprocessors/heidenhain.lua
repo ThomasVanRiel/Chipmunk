@@ -33,10 +33,9 @@ function M.generate(blocks, context)
 	for _, block in ipairs(blocks) do
 		-- First, check for blocks that are important context for other lines (e.g. modal commands, spindle on)
 
-		-- match all blocks and append to lines
-		-- TODO: Some blocks return a table which needs to be concatenated
-		-- this is intended behaviour as a cycle def should not increment the line number.
-		-- TODO: Should we add the line numbers in another pass?
+		-- Match all blocks and append to lines
+		-- `M.format_block` returns a table of lines, as some blocks are expanded into multiple lines.
+		-- Every line in block_lines receives a line number, use `\n` if no line number is needed or permitted.
 		local block_lines = M.format_block(block)
 		if block_lines then
 			for _, line in ipairs(block_lines) do
@@ -54,11 +53,6 @@ function M.generate(blocks, context)
 	return table.concat(lines, "\n")
 end
 
--- TODO: Should we return an object instead of a string? M3 and M5 are merged with the next blocks.
--- We return nil anyway on unimplemented blocks.
--- Returning a stack like object that is sent to all future blocks so they can check if they need to postfix commands.
--- > Q: What about retroactive commands? Do some commands need to edit program history?
--- > A: A field keyed "state" is in block which contains the state of the machine, according to the compiler
 function M.format_block(block)
 	------------------------------------------------------------------------------
 	-- Standard blocks
@@ -70,7 +64,7 @@ function M.format_block(block)
 	elseif block.type == "tool_change" then
 		return { "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed }
 	elseif block.type == "comment" then
-		-- TODO: "* <comment>" is also a valid comment block, when to use what comment type?
+		-- `* <comment>` is also a valid comment block, when to use what comment type?
 		return { "; " .. block.text }
 	elseif block.type == "stop" then
 		return { "M0" }
@@ -94,8 +88,6 @@ function M.format_block(block)
 		return { "L Z+0 R0 FMAX M92" }
 	elseif block.type == "home" then
 		-- Retract in machine coordinates first, then home in the plane
-		-- TODO: Does this result in correct line numbers? Should we return a table in every case to correctly number the lines?
-		-- That would require extra checks for cycles, as they do not have a new line, indicated by `~` line termination.
 		return { "L Z+0 R0 FMAX M92", "L X+0 Y+0 R0 FMAX M92" }
 	elseif block.type == "rapid" then
 		return { "L " .. M.format_coords(block) .. " FMAX" }
@@ -129,8 +121,9 @@ function M.CYCLE200(block)
 	return cycle
 end
 
+--------------------------------------------------------------------------------
 -- Helper functions
-
+--------------------------------------------------------------------------------
 function M.format_coords(block)
 	local lines = {}
 	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes

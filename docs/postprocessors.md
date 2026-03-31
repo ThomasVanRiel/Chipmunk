@@ -146,13 +146,16 @@ These block types are emitted by the current codebase:
 |---|---|---|
 | `operation_start` | `text` (string or nil) | Marks the beginning of an operation. Optional label. |
 | `operation_end` | `text` (string or nil) | Marks the end of an operation. Optional label. |
-| `tool_change` | `tool_number` (number or nil), `spindle_speed` (number) | Tool change. Heidenhain merges spindle speed into `TOOL CALL`. |
+| `tool_change` | `tool_number` (number or nil), `tool_name` (string or nil), `spindle_speed` (number) | Tool change. |
 | `comment` | `text` (string) | Operator comment. |
 | `stop` | *(none)* | Mandatory program stop (M0). |
+| `optional_stop` | *(none)* | Optional program stop (M1). |
+| `program_end` | (none) | Program end (M2 or M30). |
 | `spindle_on` | `direction` (`"cw"` or `"ccw"`) | Start spindle. No speed — speed is on `tool_change`. |
 | `spindle_off` | *(none)* | Stop spindle. |
 | `retract` | `height` (number) | Rapid retract to a specific clearance height. |
 | `retract_full` | *(none)* | Rapid retract to machine home / maximum Z. |
+| `home` | *(none)* | Rapid retract to machine home / maximum Z, and home in the plane. |
 | `rapid` | `x` (number), `y` (number), `z` (number) | Rapid positioning move. All three axes are always present. |
 | `linear` | `x` (number), `y` (number), `z` (number), `feed` (number) | Linear interpolation move with feed rate. |
 

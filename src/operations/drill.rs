@@ -75,6 +75,8 @@ impl OperationType for Drill {
         } else {
             // TODO: Calculate tool paths based on the segments.
             // Rapid to clearance, linear blocks plunge_depth down.
+            // Actually, we need to know the capabilities already during generation,
+            // where tool paths segments are generated. (At least in milling ...)
         };
         blocks.push(NCBlock::Retract {
             height: common.clearance,
