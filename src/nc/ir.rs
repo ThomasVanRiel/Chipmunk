@@ -44,6 +44,7 @@ pub enum NCBlock {
         height: f64,
     },
     RetractFull,
+    Home,
     Rapid {
         x: f64,
         y: f64,

@@ -23,8 +23,6 @@ pub fn get_capabilities(postprocessor_lua: &str) -> anyhow::Result<Postprocessor
             None => PostprocessorCapabilities::default(),
         };
 
-    tracing::info!("Postprocessor capabilities: {:#?}", capabilities);
-
     Ok(capabilities)
 }
 
@@ -51,7 +49,6 @@ pub fn generate_nc(
     // Create the context table
     let context = lua.create_table()?;
     context.set("name", program_name)?;
-    tracing::info!("Units: {:?}", units);
     context.set("units", units)?;
 
     // Convert the blocks to lua table

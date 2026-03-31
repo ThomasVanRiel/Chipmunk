@@ -37,12 +37,9 @@ function M.generate(blocks, context)
 		-- TODO: Some blocks return a table which needs to be concatenated
 		-- this is intended behaviour as a cycle def should not increment the line number.
 		-- TODO: Should we add the line numbers in another pass?
-		local line = M.format_block(block)
-		if line then
-			if type(line) == "table" then
-				-- Concatenate the lines with ~ and newline, only the first line gets a line number
-				lines[#lines + 1] = #lines .. " " .. table.concat(line, "~\n")
-			else
+		local block_lines = M.format_block(block)
+		if block_lines then
+			for _, line in ipairs(block_lines) do
 				lines[#lines + 1] = #lines .. " " .. line
 			end
 		else
@@ -63,48 +60,54 @@ end
 -- > Q: What about retroactive commands? Do some commands need to edit program history?
 -- > A: A field keyed "state" is in block which contains the state of the machine, according to the compiler
 function M.format_block(block)
-	--------------------------------------------------------------------------------
+	------------------------------------------------------------------------------
 	-- Standard blocks
-	--------------------------------------------------------------------------------
+	------------------------------------------------------------------------------
 	if block.type == "operation_start" then
-		return ""
+		return { "" }
 	elseif block.type == "operation_end" then
-		return ""
+		return { "" }
 	elseif block.type == "tool_change" then
-		return "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed
+		return { "TOOL CALL " .. block.tool_number .. " Z S" .. block.spindle_speed }
 	elseif block.type == "comment" then
 		-- TODO: "* <comment>" is also a valid comment block, when to use what comment type?
-		return "; " .. block.text
+		return { "; " .. block.text }
 	elseif block.type == "stop" then
-		return "M0"
+		return { "M0" }
 	elseif block.type == "spindle_on" then
 		-- TODO: tricky block as it is merged with the next rapid
 		-- > Q: But what if there is no rapid programmed before the next cut?
 		-- > A: For now, we activate the spindle with a dummy line
-		return "L M3"
+		return { "L M3" }
 	elseif block.type == "spindle_off" then
 		-- TODO: tricky block as it is merged with the next (or previous in some cases) rapid
 		-- For now, we stop the spindle with a dummy line
-		return "L M5"
+		return { "L M5" }
+
+	------------------------------------------------------------------------------
+	-- Moves
+	------------------------------------------------------------------------------
 	elseif block.type == "retract" then
-		return "L " .. M.ax_coord("Z", block.height) .. " FMAX"
+		return { "L " .. M.ax_coord("Z", block.height) .. " FMAX" }
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
-		return "L Z+0 R0 FMAX M92"
+		return { "L Z+0 R0 FMAX M92" }
 	elseif block.type == "home" then
 		-- Retract in machine coordinates first, then home in the plane
-		return "L Z+0 R0 FMAX M92\nL X+0 Y+0 R0 FMAX M92"
+		-- TODO: Does this result in correct line numbers? Should we return a table in every case to correctly number the lines?
+		-- That would require extra checks for cycles, as they do not have a new line, indicated by `~` line termination.
+		return { "L Z+0 R0 FMAX M92", "L X+0 Y+0 R0 FMAX M92" }
 	elseif block.type == "rapid" then
-		return "L " .. M.format_coords(block) .. " FMAX"
+		return { "L " .. M.format_coords(block) .. " FMAX" }
 
-		--------------------------------------------------------------------------------
-		-- Cycles
-		--------------------------------------------------------------------------------
+	------------------------------------------------------------------------------
+	-- Cycles
+	------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
-		-- Or we can use line `CYCL CALL`
-		return "L " .. M.format_coords(block) .. " FMAX M99"
+		-- Or we can use lines `L X Y Z FMAX` and `CYCL CALL`
+		return { "L " .. M.format_coords(block) .. " FMAX M99" }
 	elseif block.type == "cycle_drill" then
-		return M.CYCLE200(block)
+		return { table.concat(M.CYCLE200(block), "~\n") }
 	end
 
 	-- Unknown block
