@@ -1,7 +1,7 @@
 use crate::{
     core::{
-        pattern::{self, Pattern},
-        toolpath::{Locations, MoveType, ToolpathSegment},
+        pattern::Pattern,
+        toolpath::{Locations, ToolpathSegment},
     },
     nc::ir::NCBlock,
     operations::{OperationCommon, OperationType},
@@ -14,17 +14,12 @@ pub struct Drill {
 
 impl OperationType for Drill {
     fn generate(&self, common: &OperationCommon) -> Result<Vec<ToolpathSegment>> {
+        // TODO: We need to check if we need to expand the drilling cycle or if the
+        // postprocessor supports the canned cycle.
         match &self.locations {
             Locations::Points { points } => Ok(points
                 .iter()
-                .map(|[x, y]| ToolpathSegment {
-                    move_type: MoveType::Rapid,
-                    x: *x,
-                    y: *y,
-                    z: common.clearance,
-                    comment: None,
-                    pattern: None,
-                })
+                .map(|[x, y]| ToolpathSegment::rapid(*x, *y, common.clearance))
                 .collect::<Vec<_>>()),
             Locations::Pattern { pattern } => {
                 // TODO: Write the translation dict "drill" <--> Drill into consts?
@@ -41,14 +36,7 @@ impl OperationType for Drill {
                                 Ok(pattern
                                     .into_points()?
                                     .iter()
-                                    .map(|[x, y, z]| ToolpathSegment {
-                                        move_type: MoveType::Rapid,
-                                        x: *x,
-                                        y: *y,
-                                        z: *z,
-                                        comment: None,
-                                        pattern: None,
-                                    })
+                                    .map(|[x, y, z]| ToolpathSegment::rapid(*x, *y, *z))
                                     .collect::<Vec<_>>())
                             }
                         }

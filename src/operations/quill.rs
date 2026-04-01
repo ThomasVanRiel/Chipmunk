@@ -14,14 +14,7 @@ impl OperationType for Quill {
         match &self.locations {
             Locations::Points { points } => Ok(points
                 .iter()
-                .map(|[x, y]| ToolpathSegment {
-                    move_type: MoveType::Rapid,
-                    x: *x,
-                    y: *y,
-                    z: common.clearance,
-                    comment: None,
-                    pattern: None,
-                })
+                .map(|[x, y]| ToolpathSegment::rapid(*x, *y, common.clearance))
                 .collect::<Vec<_>>()),
             Locations::Pattern { pattern } => {
                 // TODO: For patterns, we need to check if the pattern is in the PP capabilities.
@@ -29,14 +22,7 @@ impl OperationType for Quill {
                 Ok(pattern
                     .into_points()?
                     .iter()
-                    .map(|[x, y, z]| ToolpathSegment {
-                        move_type: MoveType::Rapid,
-                        x: *x,
-                        y: *y,
-                        z: *z,
-                        comment: None,
-                        pattern: None,
-                    })
+                    .map(|[x, y, z]| ToolpathSegment::rapid(*x, *y, *z))
                     .collect::<Vec<_>>())
             }
         }
