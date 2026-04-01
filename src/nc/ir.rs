@@ -89,6 +89,20 @@ pub enum NCBlock {
         second_clearance: f64,
         tip_trough: bool,
     },
+
+    // Patterns
+    PatternCircular {
+        x: f64,
+        y: f64,
+        diameter: f64,
+        angle_start: f64,
+        angle_stop: f64,
+        angle_step: f64,
+        count: u32,
+        clearance: f64,
+        surface_position: f64,
+        second_clearance: f64,
+    },
 }
 
 #[derive(Debug, Serialize)]

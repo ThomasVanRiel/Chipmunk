@@ -27,7 +27,7 @@ M.file_extension = ".h"
 -- Chipmunk emits NC Cycle blocks if support is declared (see IR documentation)
 -- Make sure the cycles are handled correctly, e.g., `drill` expands to `CYCLE 200` in Heidenhain controllers
 -- TODO: Should we be able to emit unsupported blocks? Maybe a controller only supports linear moves, not arcs.
-M.capabilities = { cycles = { drill = {} } }
+M.capabilities = { cycles = { drill = { "circular" } } }
 
 ---This function is called by Chipmunk with the list of IR blocks
 ---blocks: array of block tables (see IR documentation)
@@ -141,16 +141,19 @@ function M.format_block(block)
 		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. " M99" }
 	elseif block.type == "cycle_drill" then
 		return { table.concat(M.CYCLE200(block), "~\n") }
-	end
 
 	------------------------------------------------------------------------------
 	-- Patterns
 	------------------------------------------------------------------------------
+	elseif block.type == "pattern_circular" then
+		return { table.concat(M.CYCLE220(block), "~\n"), "CYCL CALL" }
+	end
 
 	-- Unknown block
 	return nil
 end
 
+-- Drilling Cycle
 function M.CYCLE200(block)
 	local cycle = {}
 	cycle[#cycle + 1] = "CYCL DEF 200 DRILLING"
@@ -163,6 +166,26 @@ function M.CYCLE200(block)
 	cycle[#cycle + 1] = "   Q204=" .. M.cycle_coord(block.second_clearance) .. ";2ND SET-UP CLEARANCE"
 	cycle[#cycle + 1] = "   Q211=" .. M.cycle_coord(block.dwell_bottom) .. ";DWELL TIME AT DEPTH"
 	cycle[#cycle + 1] = "   Q395=" .. M.cycle_coord(block.tip_trough and 1 or 0) .. ";DEPTH REFERENCE"
+	return cycle
+end
+
+-- Polar Pattern
+function M.CYCLE220(block)
+	local cycle = {}
+	cycle[#cycle + 1] = "CYCL DEF 220 POLAR PATTERN"
+	cycle[#cycle + 1] = "   Q216=" .. M.cycle_coord(block.x) .. ";CENTER IN 1ST AXIS"
+	cycle[#cycle + 1] = "   Q217=" .. M.cycle_coord(block.y) .. ";CENTER IN 2ND AXIS"
+	cycle[#cycle + 1] = "   Q244=" .. M.cycle_coord(block.diameter) .. ";PITCH CIRCLE DIAMTR"
+	cycle[#cycle + 1] = "   Q245=" .. M.cycle_coord(block.angle_start) .. ";STARTING ANGLE"
+	cycle[#cycle + 1] = "   Q246=" .. M.cycle_coord(block.angle_stop) .. ";STOPPING ANGLE"
+	cycle[#cycle + 1] = "   Q247=" .. M.cycle_coord(block.angle_step) .. ";STEPPING ANGLE"
+	cycle[#cycle + 1] = "   Q241=" .. M.cycle_coord(block.count) .. ";NR OF REPETITIONS"
+	cycle[#cycle + 1] = "   Q200=" .. M.cycle_coord(block.clearance) .. ";SET-UP CLEARANCE"
+	cycle[#cycle + 1] = "   Q203=" .. M.cycle_coord(block.surface_position) .. ";SURFACE COORDINATE"
+	cycle[#cycle + 1] = "   Q204=" .. M.cycle_coord(block.second_clearance) .. ";2ND SET-UP CLEARANCE"
+	cycle[#cycle + 1] = "   Q301=" .. M.cycle_coord(0) .. ";MOVE TO CLEARANCE"
+	-- 0: move in straight line, 1: move in arc on pitch circle (1 is safer when drilling around a spigot)
+	cycle[#cycle + 1] = "   Q365=" .. M.cycle_coord(1) .. ";TYPE OF TRAVERSE"
 	return cycle
 end
 

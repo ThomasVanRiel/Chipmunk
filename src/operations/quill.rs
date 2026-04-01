@@ -20,6 +20,7 @@ impl OperationType for Quill {
                     y: *y,
                     z: common.clearance,
                     comment: None,
+                    pattern: None,
                 })
                 .collect::<Vec<_>>()),
             Locations::Pattern { pattern } => {
@@ -28,12 +29,13 @@ impl OperationType for Quill {
                 Ok(pattern
                     .into_points()?
                     .iter()
-                    .map(|[x, y]| ToolpathSegment {
+                    .map(|[x, y, z]| ToolpathSegment {
                         move_type: MoveType::Rapid,
                         x: *x,
                         y: *y,
-                        z: common.clearance,
+                        z: *z,
                         comment: None,
+                        pattern: None,
                     })
                     .collect::<Vec<_>>())
             }

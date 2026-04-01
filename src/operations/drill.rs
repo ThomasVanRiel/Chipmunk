@@ -1,5 +1,8 @@
 use crate::{
-    core::toolpath::{Locations, MoveType, ToolpathSegment},
+    core::{
+        pattern::{self, Pattern},
+        toolpath::{Locations, MoveType, ToolpathSegment},
+    },
     nc::ir::NCBlock,
     operations::{OperationCommon, OperationType},
 };
@@ -20,15 +23,48 @@ impl OperationType for Drill {
                     y: *y,
                     z: common.clearance,
                     comment: None,
+                    pattern: None,
                 })
                 .collect::<Vec<_>>()),
             Locations::Pattern { pattern } => {
-                // TODO: For patterns, we need to check if the pattern is in the PP capabilities.
-                // If it is not, we expand the pattern into points.
-                Err(anyhow!(
-                    "Drilling pattern {:?} not implemented yet!",
-                    pattern
-                ))
+                // TODO: Write the translation dict "drill" <--> Drill into consts?
+                // How can we do this in rust? Like serde::serialize?
+                if let Some(cycle) = common.capabilities.cycles.get("drill") {
+                    match pattern {
+                        Pattern::Circular { .. } => {
+                            // Check if the pattern is supported by the postprocessor
+                            if cycle.iter().any(|p| p == "circular") {
+                                Ok(vec![pattern.into_segment(common)?])
+                            }
+                            // Expand into points if it is unsupported
+                            else {
+                                Ok(pattern
+                                    .into_points()?
+                                    .iter()
+                                    .map(|[x, y, z]| ToolpathSegment {
+                                        move_type: MoveType::Rapid,
+                                        x: *x,
+                                        y: *y,
+                                        z: *z,
+                                        comment: None,
+                                        pattern: None,
+                                    })
+                                    .collect::<Vec<_>>())
+                            }
+                        }
+                        _ => Err(anyhow!(
+                            "Drilling pattern {:?} not implemented yet!",
+                            pattern
+                        )),
+                    }
+                } else {
+                    // TODO: Drilling cycle not supported to post, expand the pattern to points and
+                    // generate drilling ToolpathSegments at each point.
+                    Err(anyhow!(
+                        "Drilling pattern {:?} not implemented yet!",
+                        pattern
+                    ))
+                }
             }
         }
     }
@@ -71,11 +107,9 @@ impl OperationType for Drill {
                 if let Some(text) = &segment.comment {
                     blocks.push(NCBlock::Comment { text: text.clone() });
                 }
-                blocks.push(NCBlock::CycleCall {
-                    x: segment.x,
-                    y: segment.y,
-                    z: common.clearance,
-                });
+                if let Some(pattern) = &segment.pattern {
+                    blocks.push(pattern.to_owned())
+                }
             }
         } else {
             // TODO: Calculate tool paths based on the segments.

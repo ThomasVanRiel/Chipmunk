@@ -4,7 +4,7 @@ clearance: 5.0
 
 operations:
   - name: Manual Drilling test
-    type: quill
+    type: drill
     tool_number: 1
     tool_name: "Centerdrill"
     tool_diameter: 3.0
@@ -14,3 +14,5 @@ operations:
       cc: [0,0]
       diameter: 20
       count: 8
+      surface_position: 0
+      clearance: 5
