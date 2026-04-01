@@ -5,11 +5,18 @@ local Fmt = base.Fmt
 -- Define module to return formatted NC code to Chipmunk
 local M = {}
 
--- Prepare module variables to store states
-M.spindle_state = "off" -- Spindle starts in off state
-M.coolant_state = false -- Coolant starts in off state
-M.feed_state = nil -- -1 means uninitialized, 0 means "FMAX", positive values mean linear feed rate (e.g. "F100")
-M.position_state = { x = nil, y = nil, z = nil } -- We don't know the machine position at program start. Retractions don't update this position for clarity and separation between program moves and retractions.
+-- Prepare module state table to store machine state across blocks
+M.state = {
+	-- Spindle starts in off state
+	spindle = "off",
+	-- Coolant starts in off state
+	coolant = false,
+	-- nil means uninitialized, 0 means "FMAX", positive values mean linear feed rate (e.g. "F100")
+	feed = nil,
+	-- We don't know the machine position at program start.
+	-- Retractions don't update this position for clarity and separation between program moves and retractions.
+	position = { x = nil, y = nil, z = nil },
+}
 
 -- Set postprocessor information fields
 M.name = "Heidenhain"
@@ -162,7 +169,7 @@ end
 function M.spindle_word(state)
 	local postfix = ""
 	-- Check if the stored spindlestate should be updated
-	if state.spindle ~= M.spindle_state then
+	if state.spindle ~= M.state.spindle then
 		if state.spindle == "cw" then
 			postfix = " M3"
 		elseif state.spindle == "ccw" then
@@ -170,11 +177,11 @@ function M.spindle_word(state)
 		else
 			postfix = " M5"
 		end
-		M.spindle_state = state.spindle
+		M.state.spindle = state.spindle
 	end
 
 	-- Check if the stored coolantstate should be updated
-	if state.coolant ~= M.coolant_state then
+	if state.coolant ~= M.state.coolant then
 		if state.coolant then
 			-- Coolant ON
 			if postfix == "" then
@@ -188,7 +195,7 @@ function M.spindle_word(state)
 			-- Coolant OFF
 			postfix = postfix .. " M9"
 		end
-		M.coolant_state = state.coolant
+		M.state.coolant = state.coolant
 	end
 
 	return postfix
@@ -200,13 +207,13 @@ end
 ---@return string
 function M.feed_word(feed)
 	local word = ""
-	if feed ~= M.feed_state then
+	if feed ~= M.state.feed then
 		if feed == 0 then
 			word = " FMAX"
 		else
 			word = " F" .. Fmt(feed, 0)
 		end
-		M.feed_state = feed
+		M.state.feed = feed
 	end
 	return word
 end
@@ -218,21 +225,21 @@ function M.format_coords(block)
 	local lines = {}
 	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes
 	if block.x then
-		if block.x ~= M.position_state.x then
+		if block.x ~= M.state.position.x then
 			lines[#lines + 1] = "X" .. M.coord(block.x)
-			M.position_state.x = block.x
+			M.state.position.x = block.x
 		end
 	end
 	if block.y then
-		if block.y ~= M.position_state.y then
+		if block.y ~= M.state.position.y then
 			lines[#lines + 1] = "Y" .. M.coord(block.y)
-			M.position_state.y = block.y
+			M.state.position.y = block.y
 		end
 	end
 	if block.z then
-		if block.z ~= M.position_state.z then
+		if block.z ~= M.state.position.z then
 			lines[#lines + 1] = "Z" .. M.coord(block.z)
-			M.position_state.z = block.z
+			M.state.position.z = block.z
 		end
 	end
 	return table.concat(lines, " ")
