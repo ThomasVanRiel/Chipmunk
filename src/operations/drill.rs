@@ -109,6 +109,12 @@ impl OperationType for Drill {
                 }
                 if let Some(pattern) = &segment.pattern {
                     blocks.push(pattern.to_owned())
+                } else {
+                    blocks.push(NCBlock::CycleCall {
+                        x: segment.x,
+                        y: segment.y,
+                        z: common.clearance,
+                    });
                 }
             }
         } else {
