@@ -27,7 +27,6 @@ tracing-subscriber = "0.3"
 anyhow = "1"
 thiserror = "2"
 dirs = "6"
-nalgebra = "0.34"
 
 [dev-dependencies]
 tempfile = "3"

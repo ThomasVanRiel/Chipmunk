@@ -57,6 +57,8 @@ pub enum NCBlock {
         x: f64,
         y: f64,
         z: f64,
+        // TODO: Should it be possible to move at rapid feeds?
+        // The design principle is to trust the operator.
         feed: f64,
     },
     ArcCw {
@@ -64,9 +66,9 @@ pub enum NCBlock {
         y: f64,
         z: f64,
         // Provide full context to post processors, posts can pick the fields they want.
-        i: f64, // Radius offset in X
-        j: f64, // Radius offset in Y
-        r: f64, // Radius
+        i: f64, // Radius offset in X (for e.g. Haas)
+        j: f64, // Radius offset in Y (for e.g. Haas)
+        r: f64, // Radius (for e.g. Heidenhain)
         feed: f64,
     },
 

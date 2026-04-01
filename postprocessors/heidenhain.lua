@@ -26,6 +26,7 @@ M.file_extension = ".h"
 -- Omit or return empty table if none are supported
 -- Chipmunk emits NC Cycle blocks if support is declared (see IR documentation)
 -- Make sure the cycles are handled correctly, e.g., `drill` expands to `CYCLE 200` in Heidenhain controllers
+-- TODO: Should we be able to emit unsupported blocks? Maybe a controller only supports linear moves, not arcs.
 M.capabilities = { cycles = { drill = {} } }
 
 ---This function is called by Chipmunk with the list of IR blocks
@@ -95,6 +96,8 @@ function M.format_block(block)
 		return { "; " .. block.text }
 	elseif block.type == "stop" then
 		return { "M0" }
+	elseif block.type == "optional_stop" then
+		return { "M1" }
 	elseif block.type == "spindle_on" then
 		-- Should be handled by rapid and retract moves based on block.state.spindle and M.spindle_state
 		return {}
@@ -123,22 +126,26 @@ function M.format_block(block)
 		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. M.spindle_word(block.state) }
 	elseif block.type == "linear" then
 		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
-	elseif block.type == "arccw" then
-		-- TODO: Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR- for clockwise paths
-		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
-	elseif block.type == "arcccw" then
-		-- TODO: Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR+ for counterclockwise paths
-		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
+	elseif block.type == "arc_cw" then
+		-- Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR- for clockwise paths
+		return { "L " .. M.format_coords(block) .. " DR-" .. M.feed_word(block.feed) }
+	elseif block.type == "arc_ccw" then
+		-- Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR+ for counterclockwise paths
+		return { "L " .. M.format_coords(block) .. " DR+" .. M.feed_word(block.feed) }
 
 	------------------------------------------------------------------------------
 	-- Cycles
 	------------------------------------------------------------------------------
 	elseif block.type == "cycle_call" then
-		-- Or we can use separate lines `L X Y Z FMAX` and `CYCL CALL`
+		-- Or we can use separate lines `L X Y Z FMAX` and `CYCL CALL`, using M99 is idiomatic Heidenhain
 		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. " M99" }
 	elseif block.type == "cycle_drill" then
 		return { table.concat(M.CYCLE200(block), "~\n") }
 	end
+
+	------------------------------------------------------------------------------
+	-- Patterns
+	------------------------------------------------------------------------------
 
 	-- Unknown block
 	return nil
@@ -242,6 +249,10 @@ function M.format_coords(block)
 			M.state.position.z = block.z
 		end
 	end
+	if block.radius then
+		-- TODO: Can radius be negative? Maybe we just need to format the number.
+		lines[#lines + 1] = "CR" .. M.coord(block.radius)
+	end
 	return table.concat(lines, " ")
 end
 
@@ -249,7 +260,7 @@ end
 ---@param value number
 ---@return unknown
 function M.coord(value)
-	local sign = value >= 0 and "+" or "-"
+	local sign = value >= 0 and "+" or ""
 	return sign .. Fmt(value, 3)
 end
 
