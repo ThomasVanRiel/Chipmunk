@@ -41,6 +41,8 @@ pub enum NCBlock {
     SpindleOff,
     CoolantOn,
     CoolantOff,
+
+    // Moves
     Retract {
         height: f64,
     },
@@ -55,6 +57,16 @@ pub enum NCBlock {
         x: f64,
         y: f64,
         z: f64,
+        feed: f64,
+    },
+    ArcCw {
+        x: f64,
+        y: f64,
+        z: f64,
+        // Provide full context to post processors, posts can pick the fields they want.
+        i: f64, // Radius offset in X
+        j: f64, // Radius offset in Y
+        r: f64, // Radius
         feed: f64,
     },
 

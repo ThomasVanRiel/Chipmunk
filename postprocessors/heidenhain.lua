@@ -8,7 +8,8 @@ local M = {}
 -- Prepare module variables to store states
 M.spindle_state = "off" -- Spindle starts in off state
 M.coolant_state = false -- Coolant starts in off state
-M.feed_state = -1 -- -1 means uninitialized, 0 means "FMAX", positive values mean linear feed rate (e.g. "F100")
+M.feed_state = nil -- -1 means uninitialized, 0 means "FMAX", positive values mean linear feed rate (e.g. "F100")
+M.position_state = { x = nil, y = nil, z = nil } -- We don't know the machine position at program start. Retractions don't update this position for clarity and separation between program moves and retractions.
 
 -- Set postprocessor information fields
 M.name = "Heidenhain"
@@ -104,24 +105,21 @@ function M.format_block(block)
 	-- Moves
 	------------------------------------------------------------------------------
 	elseif block.type == "retract" then
-		return { "L Z" .. M.coord(block.height) .. M.feed_word(0) .. M.spindle_postfix(block.state) }
+		return { "L Z" .. M.coord(block.height) .. M.feed_word(0) .. M.spindle_word(block.state) }
 	elseif block.type == "retract_full" then
 		-- Retract in machine coordinates to the top of the z-axis
-		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state) }
+		return { "L Z+0 R0 FMAX M92" .. M.spindle_word(block.state) }
 	elseif block.type == "home" then
 		-- Retract in machine coordinates first, then home in the plane
-		return { "L Z+0 R0 FMAX M92" .. M.spindle_postfix(block.state), "L X+0 Y+0 R0 FMAX M92" }
+		return { "L Z+0 R0 FMAX M92" .. M.spindle_word(block.state), "L X+0 Y+0 R0 FMAX M92" }
 	elseif block.type == "rapid" then
-		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. M.spindle_postfix(block.state) }
+		return { "L " .. M.format_coords(block) .. M.feed_word(0) .. M.spindle_word(block.state) }
 	elseif block.type == "linear" then
-		-- TODO: Check if feed rate was changed and update accordingly.
 		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
 	elseif block.type == "arccw" then
-		-- TODO: Check if feed rate was changed and update accordingly.
 		-- TODO: Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR- for clockwise paths
 		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
 	elseif block.type == "arcccw" then
-		-- TODO: Check if feed rate was changed and update accordingly.
 		-- TODO: Circular paths in Heidenhain using `CR` with parameters X, Y, R, DR+ for counterclockwise paths
 		return { "L " .. M.format_coords(block) .. M.feed_word(block.feed) }
 
@@ -161,7 +159,7 @@ end
 ---Compile the spindle and coolant commands into their respective variants
 ---@param state any
 ---@return string
-function M.spindle_postfix(state)
+function M.spindle_word(state)
 	local postfix = ""
 	-- Check if the stored spindlestate should be updated
 	if state.spindle ~= M.spindle_state then
@@ -220,13 +218,22 @@ function M.format_coords(block)
 	local lines = {}
 	-- All coordinates are present in moves initially, but we optimize the blocks by dropping unchanged axes
 	if block.x then
-		lines[#lines + 1] = "X" .. M.coord(block.x)
+		if block.x ~= M.position_state.x then
+			lines[#lines + 1] = "X" .. M.coord(block.x)
+			M.position_state.x = block.x
+		end
 	end
 	if block.y then
-		lines[#lines + 1] = "Y" .. M.coord(block.y)
+		if block.y ~= M.position_state.y then
+			lines[#lines + 1] = "Y" .. M.coord(block.y)
+			M.position_state.y = block.y
+		end
 	end
 	if block.z then
-		lines[#lines + 1] = "Z" .. M.coord(block.z)
+		if block.z ~= M.position_state.z then
+			lines[#lines + 1] = "Z" .. M.coord(block.z)
+			M.position_state.z = block.z
+		end
 	end
 	return table.concat(lines, " ")
 end
